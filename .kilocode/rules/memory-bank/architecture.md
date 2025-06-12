@@ -75,25 +75,67 @@ The Predictive Gift Selection System follows a modular architecture with clear s
 
 ## Data Flow Architecture
 
+### Real Data Structure Analysis
+
+**Historical Training Data** (`present.selection.historic.csv`):
+```
+employee_shop, employee_branch, employee_gender,
+product_main_category, product_sub_category, product_brand,
+product_color, product_durability, product_target_gender,
+product_utility_type, product_type
+```
+
+**Classification Schema** (`product.attributes.schema.json`):
+```json
+{
+  "itemMainCategory": "string",
+  "itemSubCategory": "string",
+  "color": "string",
+  "brand": "string",
+  "vendor": "string",
+  "valuePrice": "number",
+  "targetDemographic": "male|female|unisex",
+  "utilityType": "practical|work|aesthetic|status|sentimental|exclusive",
+  "durability": "consumable|durable",
+  "usageType": "shareable|individual"
+}
+```
+
 ### Three-Step API Processing Pipeline
 
 ```
 Step 1: Raw Request Processing
-├── Input: {branch_no, gifts[], employees[]}
+├── Input: {branch_no, gifts[{product_id, description}], employees[{name}]}
 ├── Validation: Request schema validation
 └── Output: Validated raw data
 
 Step 2: Data Reclassification
 ├── Input: Raw validated data
-├── Processing: 
-│   ├── Gift categorization (description → categories)
-│   └── Employee processing (name → gender)
-└── Output: Classified feature data
+├── Processing:
+│   ├── Gift description → JSON schema attributes (LLM/rule-based)
+│   ├── Employee name → gender classification
+│   └── Field mapping: JSON schema → CSV column names
+└── Output: Classified feature data matching historical structure
 
 Step 3: Prediction Generation
-├── Input: Classified feature data
-├── Processing: XGBoost model inference
+├── Input: Classified feature data (CSV format)
+├── Processing: XGBoost model inference using historical patterns
 └── Output: {product_id, expected_qty}[]
+```
+
+### Data Field Mapping
+```
+API Classification → Historical Training Data
+itemMainCategory → product_main_category
+itemSubCategory → product_sub_category
+color → product_color
+brand → product_brand
+targetDemographic → product_target_gender
+utilityType → product_utility_type
+durability → product_durability
+usageType → product_type
+vendor → (not in historical data)
+valuePrice → (not in historical data)
 ```
 
 ## Key Technical Decisions
