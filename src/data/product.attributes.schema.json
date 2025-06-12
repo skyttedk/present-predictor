@@ -1,0 +1,83 @@
+{
+  "name": "EmployeeGiftAttributes",
+  "strict": true,
+  "schema": {
+    "type": "object",
+    "properties": {
+      "itemMainCategory": {
+        "type": "string",
+        "description": "Primary category of the item (e.g., Electronics, Apparel, Hygiene, Automotive)"
+      },
+      "itemSubCategory": {
+        "type": "string",
+        "description": "Subcategory providing more specific classification (e.g., car/bicycle, dental/manicure)"
+      },
+      "color": {
+        "type": "string",
+        "description": "Primary color of the item if applicable, NONE if not applicable"
+      },
+      "brand": {
+        "type": "string",
+        "description": "Brand name of the item if applicable, NONE if not applicable"
+      },
+      "vendor": {
+        "type": "string",
+        "description": "Vendor or supplier of the item if applicable, NONE if not applicable"
+      },
+      "valuePrice": {
+        "type": "number",
+        "description": "Monetary value or price point of the item"
+      },
+      "targetDemographic": {
+        "type": "string",
+        "enum": [
+          "male",
+          "female",
+          "unisex"
+        ],
+        "description": "Primary gender demographic the item is targeted toward"
+      },
+      "utilityType": {
+        "type": "string",
+        "enum": [
+          "practical",
+          "work",
+          "aesthetic",
+          "status",
+          "sentimental",
+          "exclusive"
+        ],
+        "description": "Primary utility or purpose of the item"
+      },
+      "durability": {
+        "type": "string",
+        "enum": [
+          "consumable",
+          "durable"
+        ],
+        "description": "Whether the item is consumed with use or remains usable long-term"
+      },
+      "usageType": {
+        "type": "string",
+        "enum": [
+          "shareable",
+          "individual"
+        ],
+        "description": "Whether the item is designed to be shared or for individual use"
+      }
+    },
+    "required": [
+      "itemMainCategory",
+      "itemSubCategory",
+      "color",
+      "brand",
+      "vendor",
+      "valuePrice",
+      "targetDemographic",
+      "utilityType",
+      "durability",
+      "usageType"
+    ],
+    "additionalProperties": false
+  }
+}
