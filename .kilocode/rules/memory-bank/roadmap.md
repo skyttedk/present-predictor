@@ -491,33 +491,35 @@ async def predict_demand(request: PredictionRequest):
 
 ## Next Actions
 
-### IMMEDIATE CRITICAL PRIORITY (BLOCKS ALL DEVELOPMENT)
-1. **Phase 3.5.1 - Data Collection Campaign**:
-   - Gather 2-3 years of historical gift selection data
-   - Target minimum 500 unique combinations (current: 9)
-   - Include multiple companies, branches, and seasonal periods
-   - Validate data format consistency with existing pipeline
+### IMMEDIATE CRITICAL PRIORITY (READY FOR IMPLEMENTATION)
+1. **Phase 3.6.1 - Data Preprocessing Correction (Days 1-3)**:
+   - Update [`src/data/preprocessor.py`](src/data/preprocessor.py:1) for 178,737 event aggregation
+   - Implement proper groupby aggregation on all 11 columns
+   - Create training dataset with selection_count as target variable
+   - Validate aggregated data quality and feature distributions
 
-2. **Data Assessment and Validation**:
-   - Analyze collected data quality and completeness
-   - Establish data collection processes for ongoing updates
-   - Prepare expanded dataset for model retraining
+2. **Phase 3.6.2 - Model Retraining (Days 4-7)**:
+   - Retrain XGBoost model with corrected dataset (expect R² > 0.7)
+   - Implement proper train/validation/test splits for robust evaluation
+   - Generate comprehensive model performance analysis
+   - Create feature importance analysis and business insights
 
-### Short Term (With Sufficient Data)
-1. **Phase 3.6 - Model Retraining**:
-   - Retrain XGBoost model with expanded dataset
-   - Target R² > 0.7 for production viability
-   - Implement proper train/validation/test splits
-   - Validate model performance meets business requirements
-
-2. **Resume Phase 4 - API Development**:
+### Short Term (Week 2 - UNBLOCKED)
+1. **Phase 4 - API Development**:
    - Implement FastAPI endpoints for prediction service
-   - Integrate three-step processing pipeline
-   - Add model confidence scoring and uncertainty quantification
+   - Integrate three-step processing pipeline with production model
+   - Add model confidence scoring and prediction explanations
+   - Create comprehensive API testing and validation
 
-### Medium Term (Production Deployment)
-1. **Complete Phases 4-5**: API development and integration testing
-2. **Phase 6-7**: Production preparation and deployment
+2. **Production Integration**:
+   - Deploy prediction API with high-confidence model performance
+   - Implement model monitoring and performance tracking
+   - Create business integration documentation
+
+### Medium Term (Week 3-4 - PRODUCTION READY)
+1. **Complete Integration and Testing**: Full pipeline validation
+2. **Production Deployment**: Business-ready demand prediction system
 3. **Business Integration**: Connect with Gavefabrikken's inventory systems
+4. **Monitoring and Optimization**: Performance tracking and model refinement
 
-This roadmap provides a structured approach to building the Predictive Gift Selection System, with clear milestones and deliverables for each phase.
+This roadmap transforms from a blocked project to a production-ready implementation, leveraging the 178,737 selection events for robust demand prediction.

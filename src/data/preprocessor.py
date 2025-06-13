@@ -1,208 +1,84 @@
 """
-Data preprocessing pipeline for the Predictive Gift Selection System.
-Handles historical data loading, cleaning, and aggregation for ML training.
+API data preprocessing utilities for the Predictive Gift Selection System.
+Lightweight processing for the three-step API pipeline only.
 """
 
 import logging
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Any, Optional
 import pandas as pd
-from pathlib import Path
+from sklearn.preprocessing import LabelEncoder
 
-from .schemas.data_models import HistoricalRecord, load_historical_data, create_dataframe_from_records
+from .schemas.data_models import ClassifiedGift, ProcessedEmployee
 from ..config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
 
-class DataPreprocessor:
+class APIDataProcessor:
     """
-    Data preprocessing pipeline for historical gift selection data.
-    Aggregates selection events and prepares training data for XGBoost.
+    Lightweight data processor for API requests only.
+    Transforms classified API data into model-ready format.
     """
     
-    def __init__(self):
-        """Initialize the data preprocessor."""
+    def __init__(self, label_encoders: Optional[Dict[str, LabelEncoder]] = None):
+        """
+        Initialize API data processor.
+        
+        Args:
+            label_encoders: Pre-trained label encoders from notebook training
+        """
         self.settings = get_settings()
-        self.raw_data: Optional[pd.DataFrame] = None
-        self.aggregated_data: Optional[pd.DataFrame] = None
-        self.feature_columns: List[str] = []
+        self.label_encoders = label_encoders or {}
         
-    def load_historical_data(self, file_path: Optional[str] = None) -> pd.DataFrame:
+    def prepare_api_features(
+        self, 
+        gifts: List[ClassifiedGift], 
+        employees: List[ProcessedEmployee],
+        branch_no: str
+    ) -> pd.DataFrame:
         """
-        Load historical data from CSV file.
+        Convert API request data to model input format.
         
         Args:
-            file_path: Path to historical data file. If None, uses default path.
+            gifts: List of classified gifts from Step 2
+            employees: List of processed employees from Step 2  
+            branch_no: Branch number from API request
             
         Returns:
-            Raw historical data as DataFrame
+            DataFrame ready for model prediction
         """
-        if file_path is None:
-            file_path = "src/data/historical/present.selection.historic.csv"
+        # Create feature combinations for each gift-employee pair
+        features_list = []
         
-        # Try different encodings to handle various file formats
-        encodings_to_try = ['utf-8', 'latin-1', 'iso-8859-1', 'cp1252']
+        for gift in gifts:
+            for employee in employees:
+                features = {
+                    'employee_shop': branch_no,
+                    'employee_branch': branch_no,
+                    'employee_gender': employee.gender,
+                    'product_main_category': gift.item_main_category,
+                    'product_sub_category': gift.item_sub_category,
+                    'product_brand': gift.brand,
+                    'product_color': gift.color,
+                    'product_durability': gift.durability,
+                    'product_target_gender': gift.target_demographics,
+                    'product_utility_type': gift.utility_type,
+                    'product_type': gift.usage_type
+                }
+                features_list.append(features)
         
-        df = None
-        last_error = None
+        # Convert to DataFrame
+        features_df = pd.DataFrame(features_list)
         
-        for encoding in encodings_to_try:
-            try:
-                df = pd.read_csv(file_path, encoding=encoding)
-                logger.info(f"Successfully loaded CSV with {encoding} encoding")
-                break
-            except UnicodeDecodeError as e:
-                last_error = e
-                logger.debug(f"Failed to load with {encoding} encoding: {e}")
-                continue
-            except Exception as e:
-                # For other exceptions, don't continue trying encodings
-                logger.error(f"Error loading CSV file: {e}")
-                raise
+        # Apply label encoding using pre-trained encoders
+        encoded_df = self._apply_label_encoding(features_df)
         
-        if df is None:
-            logger.error(f"Could not read CSV file with any encoding. Last error: {last_error}")
-            raise ValueError(f"Could not read CSV file with any of the tried encodings: {encodings_to_try}")
-        
-        try:
-            # Clean the data
-            df = self._clean_raw_data(df)
-            
-            # Store raw data
-            self.raw_data = df
-            
-            logger.info(f"Loaded {len(df)} historical records from {file_path}")
-            return df
-            
-        except Exception as e:
-            logger.error(f"Failed to process historical data from {file_path}: {e}")
-            raise
+        logger.info(f"Prepared {len(encoded_df)} feature combinations for prediction")
+        return encoded_df
     
-    def _clean_raw_data(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _apply_label_encoding(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Clean raw historical data.
-        
-        Args:
-            df: Raw DataFrame
-            
-        Returns:
-            Cleaned DataFrame
-        """
-        # Remove quotes from string columns
-        string_columns = df.select_dtypes(include=['object']).columns
-        for col in string_columns:
-            df[col] = df[col].astype(str).str.strip('"').str.strip()
-        
-        # Handle missing values
-        df = df.fillna("NONE")
-        
-        # Standardize categorical values
-        df = self._standardize_categories(df)
-        
-        return df
-    
-    def _standardize_categories(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Standardize categorical values for consistency."""
-        df = df.copy()
-        
-        # Standardize gender values
-        if 'employee_gender' in df.columns:
-            df['employee_gender'] = df['employee_gender'].str.lower()
-            
-        if 'product_target_gender' in df.columns:
-            df['product_target_gender'] = df['product_target_gender'].str.lower()
-        
-        # Standardize utility types
-        if 'product_utility_type' in df.columns:
-            df['product_utility_type'] = df['product_utility_type'].str.lower()
-        
-        # Standardize durability
-        if 'product_durability' in df.columns:
-            df['product_durability'] = df['product_durability'].str.lower()
-        
-        # Standardize usage type
-        if 'product_type' in df.columns:
-            df['product_type'] = df['product_type'].str.lower()
-        
-        return df
-    
-    def aggregate_selection_events(self, df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
-        """
-        Aggregate selection events by counting occurrences.
-        Each row in historical data represents a selection event.
-        
-        Args:
-            df: DataFrame to aggregate. If None, uses loaded data.
-            
-        Returns:
-            Aggregated DataFrame with selection counts
-        """
-        if df is None:
-            if self.raw_data is None:
-                raise ValueError("No data loaded. Call load_historical_data() first.")
-            df = self.raw_data
-        
-        # Define grouping columns (all categorical features)
-        grouping_columns = [
-            'employee_shop',
-            'employee_branch', 
-            'employee_gender',
-            'product_main_category',
-            'product_sub_category',
-            'product_brand',
-            'product_color',
-            'product_durability',
-            'product_target_gender',
-            'product_utility_type',
-            'product_type'
-        ]
-        
-        # Ensure all grouping columns exist
-        missing_columns = [col for col in grouping_columns if col not in df.columns]
-        if missing_columns:
-            raise ValueError(f"Missing columns in data: {missing_columns}")
-        
-        # Aggregate by counting selection events
-        aggregated = df.groupby(grouping_columns).size().reset_index(name='selection_count')
-        
-        # Store feature columns (excluding target)
-        self.feature_columns = grouping_columns
-        self.aggregated_data = aggregated
-        
-        logger.info(f"Aggregated {len(df)} events into {len(aggregated)} unique combinations")
-        return aggregated
-    
-    def create_training_features(self, df: Optional[pd.DataFrame] = None) -> Tuple[pd.DataFrame, pd.Series]:
-        """
-        Create feature matrix and target variable for ML training.
-        
-        Args:
-            df: Aggregated DataFrame. If None, uses stored aggregated data.
-            
-        Returns:
-            Tuple of (features_df, target_series)
-        """
-        if df is None:
-            if self.aggregated_data is None:
-                raise ValueError("No aggregated data. Call aggregate_selection_events() first.")
-            df = self.aggregated_data
-        
-        # Separate features and target
-        features_df = df[self.feature_columns].copy()
-        target_series = df['selection_count']
-        
-        # Encode categorical features
-        features_encoded = self._encode_categorical_features(features_df)
-        
-        logger.info(f"Created training features: {features_encoded.shape}")
-        logger.info(f"Target distribution - Mean: {target_series.mean():.2f}, Max: {target_series.max()}")
-        
-        return features_encoded, target_series
-    
-    def _encode_categorical_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Encode categorical features for ML training.
-        Uses label encoding for now, can be enhanced with one-hot encoding.
+        Apply pre-trained label encoders to categorical features.
         
         Args:
             df: Features DataFrame
@@ -210,125 +86,120 @@ class DataPreprocessor:
         Returns:
             Encoded features DataFrame
         """
-        from sklearn.preprocessing import LabelEncoder
-        
         encoded_df = df.copy()
-        self.label_encoders = {}
         
         for column in df.columns:
-            if df[column].dtype == 'object':
-                le = LabelEncoder()
-                encoded_df[column] = le.fit_transform(df[column].astype(str))
-                self.label_encoders[column] = le
+            if column in self.label_encoders:
+                le = self.label_encoders[column]
+                try:
+                    # Handle unknown categories by using the first known category
+                    encoded_values = []
+                    for value in df[column]:
+                        if value in le.classes_:
+                            encoded_values.append(le.transform([value])[0])
+                        else:
+                            logger.warning(f"Unknown category '{value}' in {column}, using default")
+                            encoded_values.append(0)  # Use first category as default
+                    
+                    encoded_df[column] = encoded_values
+                    
+                except Exception as e:
+                    logger.error(f"Error encoding {column}: {e}")
+                    # Fallback: use simple numeric encoding
+                    unique_values = df[column].unique()
+                    value_map = {val: idx for idx, val in enumerate(unique_values)}
+                    encoded_df[column] = df[column].map(value_map)
+            else:
+                logger.warning(f"No label encoder found for {column}, using simple encoding")
+                unique_values = df[column].unique()
+                value_map = {val: idx for idx, val in enumerate(unique_values)}
+                encoded_df[column] = df[column].map(value_map)
         
         return encoded_df
     
-    def get_data_summary(self) -> Dict[str, Any]:
-        """Get summary statistics of the processed data."""
-        summary = {}
+    def aggregate_predictions(
+        self, 
+        predictions: List[float], 
+        gifts: List[ClassifiedGift],
+        employees: List[ProcessedEmployee]
+    ) -> Dict[str, float]:
+        """
+        Aggregate predictions per gift across all employees.
         
-        if self.raw_data is not None:
-            summary['raw_data'] = {
-                'total_records': len(self.raw_data),
-                'unique_employees': self.raw_data['employee_gender'].value_counts().to_dict(),
-                'unique_categories': self.raw_data['product_main_category'].nunique(),
-                'unique_brands': self.raw_data['product_brand'].nunique(),
-            }
+        Args:
+            predictions: Model predictions for each gift-employee combination
+            gifts: Original gift list
+            employees: Original employee list
+            
+        Returns:
+            Dictionary mapping product_id to expected quantity
+        """
+        # Reshape predictions into gift x employee matrix
+        n_employees = len(employees)
+        gift_predictions = {}
         
-        if self.aggregated_data is not None:
-            summary['aggregated_data'] = {
-                'unique_combinations': len(self.aggregated_data),
-                'total_selections': self.aggregated_data['selection_count'].sum(),
-                'avg_selections_per_combination': self.aggregated_data['selection_count'].mean(),
-                'max_selections': self.aggregated_data['selection_count'].max(),
-                'selection_distribution': self.aggregated_data['selection_count'].value_counts().head(10).to_dict()
-            }
+        for i, gift in enumerate(gifts):
+            # Sum predictions across all employees for this gift
+            start_idx = i * n_employees
+            end_idx = start_idx + n_employees
+            gift_total = sum(predictions[start_idx:end_idx])
+            gift_predictions[gift.product_id] = max(1, round(gift_total))  # Minimum 1
         
-        return summary
-    
-    def get_category_insights(self) -> Dict[str, Any]:
-        """Get insights about product categories and employee preferences."""
-        if self.aggregated_data is None:
-            return {}
-        
-        insights = {}
-        
-        # Most popular product categories
-        category_popularity = (
-            self.aggregated_data.groupby('product_main_category')['selection_count']
-            .sum()
-            .sort_values(ascending=False)
-            .head(10)
-            .to_dict()
-        )
-        insights['popular_categories'] = category_popularity
-        
-        # Gender preferences
-        gender_preferences = (
-            self.aggregated_data.groupby(['employee_gender', 'product_main_category'])['selection_count']
-            .sum()
-            .unstack(fill_value=0)
-            .to_dict()
-        )
-        insights['gender_preferences'] = gender_preferences
-        
-        # Brand popularity
-        brand_popularity = (
-            self.aggregated_data.groupby('product_brand')['selection_count']
-            .sum()
-            .sort_values(ascending=False)
-            .head(10)
-            .to_dict()
-        )
-        insights['popular_brands'] = brand_popularity
-        
-        return insights
+        logger.info(f"Aggregated predictions for {len(gift_predictions)} gifts")
+        return gift_predictions
 
 
-def load_and_preprocess_historical_data(file_path: Optional[str] = None) -> Tuple[pd.DataFrame, pd.Series, DataPreprocessor]:
+def load_label_encoders(encoders_path: str = "models/label_encoders.pkl") -> Dict[str, LabelEncoder]:
     """
-    Convenience function to load and preprocess historical data.
+    Load pre-trained label encoders from notebook training.
     
     Args:
-        file_path: Path to historical data file
+        encoders_path: Path to saved encoders
         
     Returns:
-        Tuple of (features, target, preprocessor)
+        Dictionary of label encoders
     """
-    preprocessor = DataPreprocessor()
+    import pickle
+    from pathlib import Path
     
-    # Load and aggregate data
-    raw_data = preprocessor.load_historical_data(file_path)
-    aggregated_data = preprocessor.aggregate_selection_events(raw_data)
+    if not Path(encoders_path).exists():
+        logger.warning(f"Label encoders not found at {encoders_path}")
+        return {}
     
-    # Create training features
-    features, target = preprocessor.create_training_features(aggregated_data)
-    
-    return features, target, preprocessor
+    try:
+        with open(encoders_path, 'rb') as f:
+            encoders = pickle.load(f)
+        logger.info(f"Loaded {len(encoders)} label encoders")
+        return encoders
+    except Exception as e:
+        logger.error(f"Error loading label encoders: {e}")
+        return {}
 
 
-def analyze_historical_patterns(file_path: Optional[str] = None) -> Dict[str, Any]:
+# Convenience function for API endpoints
+def process_api_request(
+    gifts: List[ClassifiedGift],
+    employees: List[ProcessedEmployee], 
+    branch_no: str,
+    encoders_path: str = "models/label_encoders.pkl"
+) -> pd.DataFrame:
     """
-    Analyze historical selection patterns.
+    One-step processing for API requests.
     
     Args:
-        file_path: Path to historical data file
+        gifts: Classified gifts from Step 2
+        employees: Processed employees from Step 2
+        branch_no: Branch number
+        encoders_path: Path to trained encoders
         
     Returns:
-        Analysis results dictionary
+        Model-ready features DataFrame
     """
-    preprocessor = DataPreprocessor()
+    # Load encoders trained from notebook
+    label_encoders = load_label_encoders(encoders_path)
     
-    # Load and process data
-    raw_data = preprocessor.load_historical_data(file_path)
-    aggregated_data = preprocessor.aggregate_selection_events(raw_data)
+    # Process data
+    processor = APIDataProcessor(label_encoders)
+    features = processor.prepare_api_features(gifts, employees, branch_no)
     
-    # Get insights
-    summary = preprocessor.get_data_summary()
-    insights = preprocessor.get_category_insights()
-    
-    return {
-        'summary': summary,
-        'insights': insights,
-        'preprocessor': preprocessor
-    }
+    return features
