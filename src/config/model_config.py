@@ -11,15 +11,15 @@ class XGBoostConfig(BaseModel):
     """XGBoost model hyperparameters configuration."""
     
     # Core XGBoost parameters
-    n_estimators: int = Field(default=100, description="Number of boosting rounds")
-    max_depth: int = Field(default=6, description="Maximum depth of trees")
-    learning_rate: float = Field(default=0.1, description="Boosting learning rate")
+    n_estimators: int = Field(default=50, description="Number of boosting rounds (reduced for small datasets)")
+    max_depth: int = Field(default=2, description="Maximum depth of trees (reduced to prevent overfitting)")
+    learning_rate: float = Field(default=0.3, description="Boosting learning rate (increased for fewer estimators)")
     subsample: float = Field(default=1.0, description="Subsample ratio of training instances")
     colsample_bytree: float = Field(default=1.0, description="Subsample ratio of columns")
     
-    # Regularization parameters
-    reg_alpha: float = Field(default=0.0, description="L1 regularization term")
-    reg_lambda: float = Field(default=1.0, description="L2 regularization term")
+    # Regularization parameters (increased to prevent overfitting on small data)
+    reg_alpha: float = Field(default=1.0, description="L1 regularization term (increased)")
+    reg_lambda: float = Field(default=2.0, description="L2 regularization term (increased)")
     gamma: float = Field(default=0.0, description="Minimum loss reduction for split")
     
     # Tree construction parameters

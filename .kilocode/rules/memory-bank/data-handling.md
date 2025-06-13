@@ -129,14 +129,21 @@ usageType          → product_type
 
 ### Step 2: Classification Processing
 **Required Operations**:
-1. **Gift Description → Schema Attributes**
-   - Parse description to extract category, brand, color, etc.
-   - Apply JSON schema validation
+1. **Gift Description → Schema Attributes (OpenAI Assistant)**
+   - **Use OpenAI Assistant API** (Assistant ID: `asst_BuFvA6iXF4xSyQ4px7Q5zjiN`)
+   - Send product description to trained OpenAI agent via Assistant API
+   - Receive structured JSON response matching `product.attributes.schema.json`
+   - API flow: CreateThread → AddMessage → Run → GetRunStatus → GetThreadMessage
+   - Apply JSON schema validation to response
    - Handle missing/default values
 
-2. **Employee Name → Gender Classification** 
-   - Implement name-to-gender mapping
-   - Handle edge cases and unknowns
+2. **Employee Name → Gender Classification (Enhanced gender_guesser)**
+   - **Use enhanced gender_guesser with Danish name support**
+   - Normalize names to proper case (handle hyphens, spaces, compound names)
+   - Check against enhanced Danish names dictionary (ea, my, freja, bo, aksel, etc.)
+   - Fallback to gender_guesser with Denmark country code
+   - Handle uncertain results gracefully (return 'unknown' for low confidence)
+   - Support for Nordic/European name patterns
 
 3. **Branch Processing**
    - Map branch_no to employee_shop and employee_branch
