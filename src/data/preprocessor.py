@@ -40,22 +40,31 @@ class DataPreprocessor:
         if file_path is None:
             file_path = "src/data/historical/present.selection.historic.csv"
         
+        # Try different encodings to handle various file formats
+        encodings_to_try = ['utf-8', 'latin-1', 'iso-8859-1', 'cp1252']
+        
+        df = None
+        last_error = None
+        
+        for encoding in encodings_to_try:
+            try:
+                df = pd.read_csv(file_path, encoding=encoding)
+                logger.info(f"Successfully loaded CSV with {encoding} encoding")
+                break
+            except UnicodeDecodeError as e:
+                last_error = e
+                logger.debug(f"Failed to load with {encoding} encoding: {e}")
+                continue
+            except Exception as e:
+                # For other exceptions, don't continue trying encodings
+                logger.error(f"Error loading CSV file: {e}")
+                raise
+        
+        if df is None:
+            logger.error(f"Could not read CSV file with any encoding. Last error: {last_error}")
+            raise ValueError(f"Could not read CSV file with any of the tried encodings: {encodings_to_try}")
+        
         try:
-            # Try different encodings to handle various file formats
-            encodings_to_try = ['utf-8', 'latin-1', 'iso-8859-1', 'cp1252']
-            
-            df = None
-            for encoding in encodings_to_try:
-                try:
-                    df = pd.read_csv(file_path, encoding=encoding)
-                    logger.info(f"Successfully loaded CSV with {encoding} encoding")
-                    break
-                except UnicodeDecodeError:
-                    continue
-            
-            if df is None:
-                raise ValueError(f"Could not read CSV file with any of the tried encodings: {encodings_to_try}")
-            
             # Clean the data
             df = self._clean_raw_data(df)
             
@@ -66,7 +75,7 @@ class DataPreprocessor:
             return df
             
         except Exception as e:
-            logger.error(f"Failed to load historical data from {file_path}: {e}")
+            logger.error(f"Failed to process historical data from {file_path}: {e}")
             raise
     
     def _clean_raw_data(self, df: pd.DataFrame) -> pd.DataFrame:
