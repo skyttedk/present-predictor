@@ -10,20 +10,20 @@ from pydantic import BaseModel, Field
 class XGBoostConfig(BaseModel):
     """XGBoost model hyperparameters configuration."""
     
-    # Core XGBoost parameters
-    n_estimators: int = Field(default=50, description="Number of boosting rounds (reduced for small datasets)")
-    max_depth: int = Field(default=2, description="Maximum depth of trees (reduced to prevent overfitting)")
-    learning_rate: float = Field(default=0.3, description="Boosting learning rate (increased for fewer estimators)")
-    subsample: float = Field(default=1.0, description="Subsample ratio of training instances")
-    colsample_bytree: float = Field(default=1.0, description="Subsample ratio of columns")
+    # Core XGBoost parameters - OPTIMIZED FOR LARGE DATASETS (98K+ combinations)
+    n_estimators: int = Field(default=800, description="Number of boosting rounds (optimized for large datasets)")
+    max_depth: int = Field(default=7, description="Maximum depth of trees (deeper for complex patterns)")
+    learning_rate: float = Field(default=0.05, description="Boosting learning rate (lower for stable learning)")
+    subsample: float = Field(default=0.8, description="Subsample ratio (80% for efficiency)")
+    colsample_bytree: float = Field(default=0.8, description="Feature sampling (80% for generalization)")
     
-    # Regularization parameters (increased to prevent overfitting on small data)
-    reg_alpha: float = Field(default=1.0, description="L1 regularization term (increased)")
-    reg_lambda: float = Field(default=2.0, description="L2 regularization term (increased)")
-    gamma: float = Field(default=0.0, description="Minimum loss reduction for split")
+    # Regularization parameters (reduced for large datasets)
+    reg_alpha: float = Field(default=0.1, description="L1 regularization term (reduced for large data)")
+    reg_lambda: float = Field(default=0.1, description="L2 regularization term (reduced for large data)")
+    gamma: float = Field(default=0.1, description="Minimum loss reduction for split")
     
     # Tree construction parameters
-    min_child_weight: int = Field(default=1, description="Minimum sum of instance weight")
+    min_child_weight: int = Field(default=5, description="Minimum sum of instance weight (increased for stability)")
     max_delta_step: int = Field(default=0, description="Maximum delta step for weight estimation")
     
     # General parameters

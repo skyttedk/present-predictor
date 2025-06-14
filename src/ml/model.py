@@ -56,6 +56,12 @@ class DemandPredictor:
         # Store feature names
         self.feature_names = list(X.columns)
         
+        # Determine dataset size category for optimal training approach
+        dataset_size = len(X)
+        is_large_dataset = dataset_size >= 10000  # 10K+ combinations = large dataset
+        
+        logger.info(f"Dataset size category: {'Large' if is_large_dataset else 'Medium' if dataset_size >= 100 else 'Small'}")
+        
         # Handle small datasets (< 10 samples) differently
         if len(X) < 10:
             logger.warning(f"Small dataset detected ({len(X)} samples). Using full dataset for training.")
@@ -87,18 +93,33 @@ class DemandPredictor:
             logger.info(f"Model training completed on small dataset. Full dataset R²: {full_metrics['r2']:.4f}")
             
         else:
-            # Normal training for larger datasets
+            # Enhanced training for medium and large datasets
             # Split data for training and validation
             X_train, X_val, y_train, y_val = train_test_split(
                 X, y, test_size=validation_split, random_state=42, stratify=None
             )
             
-            # Train the model
-            self.model.fit(
-                X_train, y_train,
-                eval_set=[(X_val, y_val)],
-                verbose=False
-            )
+            logger.info(f"Training set: {len(X_train)} samples, Validation set: {len(X_val)} samples")
+            
+            # Enhanced training with early stopping for large datasets
+            if is_large_dataset:
+                logger.info("Using enhanced training for large dataset (98K+ combinations)")
+                self.model.fit(
+                    X_train, y_train,
+                    eval_set=[(X_train, y_train), (X_val, y_val)],
+                    eval_metric=['rmse', 'mae'],
+                    early_stopping_rounds=50,  # More patience for large datasets
+                    verbose=True if dataset_size > 50000 else False
+                )
+            else:
+                # Standard training for medium datasets
+                self.model.fit(
+                    X_train, y_train,
+                    eval_set=[(X_val, y_val)],
+                    eval_metric='rmse',
+                    early_stopping_rounds=20,
+                    verbose=False
+                )
             
             # Make predictions for evaluation
             y_train_pred = self.model.predict(X_train)
