@@ -139,6 +139,7 @@ pip install -r requirements-dev.txt
 - **Pandas DataFrames**: Structured data manipulation
 - **NumPy Arrays**: Numerical computations
 - **Custom Classifiers**: Gift categorization logic
+- **Shop-level Aggregates**: Creation of features like shop diversity and most frequent items.
 
 ### Model Operations
 - **XGBoost API**: Model training and inference

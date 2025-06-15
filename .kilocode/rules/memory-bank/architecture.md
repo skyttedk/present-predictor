@@ -54,13 +54,13 @@ The Predictive Gift Selection System follows a modular architecture with clear s
 - **Framework**: XGBoost for regression
 - **Responsibilities**:
   - Model training and validation
-  - Feature engineering
+  - Feature engineering (including original 11 features and shop assortment features)
   - Prediction generation
   - Model performance monitoring
 
 **Key Files**:
 - `model.py` - XGBoost model implementation
-- `features.py` - Feature engineering pipeline
+- `features.py` - Feature engineering pipeline (handles base features and shop-level aggregates)
 - `trainer.py` - Model training orchestration
 - `predictor.py` - Prediction service
 - `evaluation.py` - Model metrics and validation
