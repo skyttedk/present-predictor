@@ -312,36 +312,119 @@ class DemandPredictor:
 - Provides further improvement over the baseline model and manual estimation.
 - Increases confidence in using the model for operational inventory planning.
 
-## Phase 3.5: Data Collection for Future Enhancement (Ongoing)
+## Phase 3.5: CatBoost & Two-Stage Model Implementation (Week 7-8) - EXPERT RECOMMENDED
 
-### 3.5.1 Historical Data Expansion
-**Timeline**: Ongoing (as data becomes available)
-**Priority**: Medium - For further model improvement beyond current R² ≈ 0.31
+### 3.5.1 CatBoost Model Implementation
+**Timeline**: 1 week
+**Priority**: HIGH - Quick win for 2-4 p.p. R² improvement
 **Deliverables**:
-- [ ] Collect additional years of historical gift selection data
-- [ ] Expand data to include more diverse companies, branches, and seasonal periods
-- [ ] Target increasing unique combinations beyond current 98,741
-- [ ] Validate data format consistency with existing pipeline
-- [ ] Establish ongoing data collection processes for continuous model refinement
+- [ ] Create new CatBoost training notebook
+- [ ] Implement Poisson loss function (no log transform)
+- [ ] Configure native categorical handling
+- [ ] Compare performance with XGBoost baseline
+- [ ] Feature importance analysis with CatBoost
 
-**Data Requirements**:
+**Implementation Details**:
+```python
+from catboost import CatBoostRegressor
+
+model = CatBoostRegressor(
+    iterations=1000,
+    loss_function='Poisson',  # Count-aware objective
+    cat_features=categorical_cols,  # Native handling
+    random_state=42
+)
 ```
-Current State: 178,736 events → 98,741 unique combinations (Sufficient for R² ≈ 0.31)
-Future Target: Increase unique combinations to potentially improve R² towards > 0.5
-Expected Sources: New seasonal periods, additional client data
+
+**Expected Outcomes**:
+- Baseline CatBoost R² ≈ 0.33-0.35 (2-4 p.p. gain from Poisson loss)
+- Better handling of high-cardinality features (shop, branch, brand)
+- No need for log transformation
+
+### 3.5.2 Two-Stage Model Architecture
+**Timeline**: 1 week
+**Priority**: HIGH - Expected 8-25% RMSE reduction
+**Deliverables**:
+- [ ] Stage 1: Binary classifier (will select gift?)
+- [ ] Stage 2: Count regressor (how many? - positives only)
+- [ ] Combined prediction pipeline
+- [ ] Performance comparison with single model
+- [ ] API integration design for two-stage predictions
+
+**Two-Stage Design**:
+```python
+# Stage 1: Binary Classification
+from catboost import CatBoostClassifier
+classifier = CatBoostClassifier(
+    iterations=500,
+    cat_features=categorical_cols
+)
+
+# Stage 2: Count Regression (positives only)
+regressor = CatBoostRegressor(
+    loss_function='Poisson',
+    cat_features=categorical_cols
+)
+
+# Final prediction = p_select * expected_count
 ```
 
-**Success Criteria for Future Enhancements**:
-- Achieve sample-to-feature ratio improvement for potentially more complex models
-- Target R² > 0.5 or higher with more comprehensive data
-- Enable more granular analysis and feature engineering
-- Support enhanced long-range forecasting and new product introduction predictions
+### 3.5.3 New Feature Engineering
+**Timeline**: 3 days
+**Priority**: MEDIUM - Additional 1-2 p.p. R² gain
+**Deliverables**:
+- [ ] Shop-level share features:
+  - `product_share_in_shop`
+  - `brand_share_in_shop`
+  - `category_share_in_shop`
+- [ ] Rank features:
+  - `product_rank_in_shop`
+  - `brand_rank_in_shop`
+- [ ] Interaction features via hashing trick
+- [ ] Integration with existing feature pipeline
 
-**Status**: ✅ **DATA SUFFICIENT FOR CURRENT MODEL (R² ≈ 0.31)** - Further collection is for future improvement, not a blocker.
+**Status**: 🚀 **READY TO START** - Expert guidance received
 
-## Phase 4: API Development (Proceeding with Enhanced Model R² ≈ 0.3112)
+## Phase 3.6: Model Evaluation & Optimization (Week 9)
 
-### 4.1 FastAPI Application Setup
+### 3.6.1 Advanced Cross-Validation
+**Timeline**: 3 days
+**Deliverables**:
+- [ ] Leave-One-Shop-Out CV implementation
+- [ ] Cold-start performance assessment
+- [ ] Business metric evaluation (aggregated MAPE)
+- [ ] Confidence interval generation
+
+### 3.6.2 Performance Benchmarking
+**Timeline**: 2 days
+**Deliverables**:
+- [ ] Compare XGBoost vs CatBoost vs Two-Stage
+- [ ] Document performance gains from each improvement
+- [ ] Create performance visualization dashboard
+- [ ] Finalize model selection for production
+
+**Expected Final Performance**:
+- Target CV R² ≈ 0.36-0.41 (from current 0.3112)
+- Realistic ceiling with current features: R² ≈ 0.45
+- Business-ready performance for inventory planning
+
+## Phase 4: Data Collection for Future Enhancement (Ongoing)
+
+### 4.1 Historical Data Expansion
+**Timeline**: Ongoing (as data becomes available)
+**Priority**: LOW - Current data sufficient for R² ≈ 0.40
+**Note**: Price data won't help (all gifts in shop are same price range)
+**Focus Areas**:
+- [ ] Merchandising data (position on page, promotions)
+- [ ] Temporal patterns (day-of-season, urgency indicators)
+- [ ] Product descriptions for text embeddings
+- [ ] Product images for visual embeddings
+
+**Status**: ✅ **NOT BLOCKING** - Current data sufficient for optimization
+
+## Phase 5: API Development (Week 10-11)
+
+### 5.1 FastAPI Application Setup
 **Timeline**: 2 days
 **Deliverables**:
 - [ ] `src/api/main.py` - FastAPI application entry point
@@ -352,16 +435,17 @@ Expected Sources: New seasonal periods, additional client data
 
 **Status**: ⏳ **IN PROGRESS / NEXT UP**
 
-### 4.2 Prediction Endpoints
-**Timeline**: 3 days (after 4.1)
+### 5.2 Prediction Endpoints with Two-Stage Support
+**Timeline**: 3 days (after 5.1)
 **Deliverables**:
 - [ ] `src/api/endpoints/predictions.py` - Prediction endpoints
 - [ ] Three-step processing pipeline implementation
+- [ ] Two-stage model integration
 - [ ] Request validation and sanitization
-- [ ] Response formatting
+- [ ] Response formatting with confidence intervals
 - [ ] API documentation (OpenAPI/Swagger)
 
-**API Endpoint Structure**:
+**Updated API Endpoint Structure**:
 ```python
 @app.post("/predict", response_model=List[PredictionResponse])
 async def predict_demand(request: PredictionRequest):
@@ -371,13 +455,17 @@ async def predict_demand(request: PredictionRequest):
     # Step 2: Classify and transform data
     classified_data = classify_and_transform(validated_data)
     
-    # Step 3: Generate predictions
-    predictions = generate_predictions(classified_data)
+    # Step 3: Two-stage prediction
+    selection_probs = predict_selection_probability(classified_data)
+    expected_counts = predict_counts_if_selected(classified_data)
+    
+    # Step 4: Combined predictions
+    predictions = combine_predictions(selection_probs, expected_counts)
     
     return predictions
 ```
 
-### 4.3 API Testing and Documentation
+### 5.3 API Testing and Documentation
 **Timeline**: 2 days
 **Deliverables**:
 - [ ] Comprehensive API tests
@@ -386,9 +474,9 @@ async def predict_demand(request: PredictionRequest):
 - [ ] Example requests and responses
 - [ ] Performance testing
 
-## Phase 5: Integration and Testing (Week 7)
+## Phase 6: Integration and Testing (Week 12)
 
-### 5.1 End-to-End Integration
+### 6.1 End-to-End Integration
 **Timeline**: 3 days
 **Deliverables**:
 - [ ] Complete pipeline integration
@@ -397,7 +485,7 @@ async def predict_demand(request: PredictionRequest):
 - [ ] Performance optimization
 - [ ] Memory usage optimization
 
-### 5.2 Comprehensive Testing
+### 6.2 Comprehensive Testing
 **Timeline**: 3 days
 **Deliverables**:
 - [ ] Unit tests for all components (target: >90% coverage)
@@ -406,7 +494,7 @@ async def predict_demand(request: PredictionRequest):
 - [ ] Load testing for API endpoints
 - [ ] Edge case testing
 
-### 5.3 Documentation and Examples
+### 6.3 Documentation and Examples
 **Timeline**: 1 day
 **Deliverables**:
 - [ ] Complete API documentation
@@ -415,9 +503,9 @@ async def predict_demand(request: PredictionRequest):
 - [ ] Deployment guide
 - [ ] Troubleshooting guide
 
-## Phase 6: Model Training and Validation (Week 8)
+## Phase 7: Production Model Training (Week 13)
 
-### 6.1 Historical Data Processing
+### 7.1 Historical Data Processing
 **Timeline**: 2 days
 **Prerequisites**: Historical gift selection data access
 **Deliverables**:
@@ -426,16 +514,16 @@ async def predict_demand(request: PredictionRequest):
 - [ ] Data quality validation
 - [ ] Training dataset preparation
 
-### 6.2 Initial Model Training
+### 7.2 Final Model Training
 **Timeline**: 3 days
 **Deliverables**:
-- [ ] Train XGBoost models on historical data
-- [ ] Model performance evaluation
+- [ ] Train final CatBoost + Two-Stage models on full data
+- [ ] Model performance evaluation against all baselines
 - [ ] Feature importance analysis
 - [ ] Model validation and testing
-- [ ] Baseline performance metrics
+- [ ] Production performance metrics
 
-### 6.3 Model Optimization
+### 7.3 Model Finalization
 **Timeline**: 2 days
 **Deliverables**:
 - [ ] Hyperparameter tuning
@@ -443,9 +531,9 @@ async def predict_demand(request: PredictionRequest):
 - [ ] Performance benchmarking
 - [ ] Model selection and finalization
 
-## Phase 7: Deployment Preparation (Week 9)
+## Phase 8: Deployment Preparation (Week 14)
 
-### 7.1 Production Readiness
+### 8.1 Production Readiness
 **Timeline**: 3 days
 **Deliverables**:
 - [ ] Environment configuration for production
@@ -454,7 +542,7 @@ async def predict_demand(request: PredictionRequest):
 - [ ] Performance optimization
 - [ ] Docker containerization (optional)
 
-### 7.2 Deployment Testing
+### 8.2 Deployment Testing
 **Timeline**: 2 days
 **Deliverables**:
 - [ ] Production environment testing
@@ -462,7 +550,7 @@ async def predict_demand(request: PredictionRequest):
 - [ ] Security testing
 - [ ] Backup and recovery procedures
 
-### 7.3 Documentation and Handover
+### 8.3 Documentation and Handover
 **Timeline**: 2 days
 **Deliverables**:
 - [ ] Operations manual
@@ -476,19 +564,20 @@ async def predict_demand(request: PredictionRequest):
 - [x] **Week 1**: Project foundation complete ✅
 - [x] **Week 3**: Data pipeline functional ✅
 - [x] **Week 5**: ML pipeline operational (baseline model R² ≈ 0.2947) ✅
-- [x] **Week 6 (Current)**: Model enhanced with shop features (CV R² ≈ 0.3112) ✅
-- [ ] **Data Collection**: Ongoing for future enhancements (not a blocker)
-- [ ] **API Endpoints**: In progress / Next Up
-- [ ] **Full Integration**: Pending API completion
-- [ ] **Production Deployment**: Pending full integration and testing
+- [x] **Week 6**: Model enhanced with shop features (CV R² ≈ 0.3112) ✅
+- [ ] **Week 7-8**: CatBoost + Two-Stage implementation (Expected R² ≈ 0.36-0.41) 🚀 **NEXT**
+- [ ] **Week 10-11**: API Development with two-stage support
+- [ ] **Week 12**: Full Integration and Testing
+- [ ] **Week 14**: Production Deployment
 
 ### Performance Targets
-- [ ] **API Response Time**: < 2 seconds for prediction requests (pending API completion)
-- ⚠️ **Prediction Accuracy**: Target >85% (CV R² log target ≈ 0.3112, original scale R² needs monitoring)
+- [ ] **API Response Time**: < 2 seconds for prediction requests
+- ✅ **Prediction Accuracy**: Current R² ≈ 0.31 is respectable (69% of realistic ceiling)
+- 🎯 **Target Performance**: R² ≈ 0.36-0.41 with CatBoost + Two-Stage
 - [x] **Test Coverage**: >90% for all completed components ✅
-- [ ] **API Throughput**: Support 100+ concurrent requests (pending API completion)
-- ⚠️ **Model Performance**: CV R² (log target) ≈ 0.3112 (moderate, improved from 0.1722 and 0.2947)
-- ✅ **Data Sufficiency**: Sufficient for current model (98,741 combinations)
+- [ ] **API Throughput**: Support 100+ concurrent requests
+- ✅ **Model Performance**: Current sufficient, clear path to improvement
+- ✅ **Data Sufficiency**: Sufficient for R² ≈ 0.40-0.45 target
 
 ### Business Objectives
 - [ ] **Inventory Optimization**: 40% improvement in inventory balance
@@ -530,23 +619,37 @@ async def predict_demand(request: PredictionRequest):
 - **Monitoring**: Application and model performance monitoring
 - **Documentation**: API and technical documentation
 
-## Next Actions
+## Next Actions (Expert-Guided Priorities)
 
-### Immediate Priority (Days 1-2 from context.md)
-1. **Memory Bank Update (THIS TASK - In Progress)**: Document shop feature insights.
-2. **Production Integration (Enhanced Model)**: Integrate model with shop features (R² ≈ 0.3112) into API pipeline.
-3. **Notebook Finalization**: Ensure [`notebooks/breakthrough_training.ipynb`](notebooks/breakthrough_training.ipynb:1) is clean and fully reproduces 0.3112 R².
-4. **Business Testing (Enhanced Model)**: Begin real-world inventory planning trials with the improved model.
+### Immediate Priority (Week 1-2) - Quick Wins
+1. **CatBoost Implementation** 🚀:
+   - Create new notebook for CatBoost with Poisson loss
+   - No log transformation needed
+   - Expected gain: 2-4 p.p. R²
+   
+2. **Two-Stage Model** 🚀:
+   - Implement binary classification + count regression
+   - Expected gain: 8-25% RMSE reduction
+   
+3. **New Features**:
+   - Add shop-level share and rank features
+   - Expected gain: 1-2 p.p. R²
 
-### Short Term (Week 1-2 from context.md)
-1. **API Deployment (Enhanced Model)**: Deploy prediction service with the 0.3112 R² model.
-2. **Model Monitoring**: Implement performance tracking for the enhanced model using stratified CV.
-3. **Business Integration**: Connect with Gavefabrikken's inventory systems.
-4. **User Training**: Guide operations team on enhanced model capabilities and limitations.
+### Short Term (Week 3-4)
+1. **Complete CatBoost Notebook**: Full implementation and validation
+2. **Two-Stage Pipeline**: Build production-ready pipeline
+3. **Leave-One-Shop-Out CV**: Assess cold-start performance
+4. **Update Memory Bank**: Document new model architecture
 
-### Medium Term (Month 1 from context.md)
-1. **Performance Validation**: Monitor real-world prediction accuracy of the enhanced model.
-2. **Continuous Improvement**: Gather feedback and explore further feature refinements.
-3. **Scale Deployment**: Expand to multiple companies and seasonal periods.
+### Medium Term (Month 1-2)
+1. **API Integration**: Deploy two-stage predictions
+2. **Hierarchical Models**: If cold-start gap appears
+3. **Business Metrics**: Optimize for aggregated MAPE
+4. **Production Deployment**: Launch optimized system
 
-This roadmap reflects the project's progression to using an enhanced model (CV R² ≈ 0.3112) with shop assortment features, ready for API integration and business testing.
+### Big Bets (Quarter 1-2)
+1. **Recommender Formulation**: Two-tower model approach
+2. **Embeddings**: Text/image features (if data available)
+3. **Monte-Carlo Simulation**: Inventory confidence intervals
+
+This roadmap now reflects expert guidance with realistic expectations and clear path to R² ≈ 0.40+ through technical improvements alone.

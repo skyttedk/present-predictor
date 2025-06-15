@@ -6,10 +6,10 @@ The Predictive Gift Selection System follows a modular architecture with clear s
 ## High-Level Architecture
 
 ```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   API Gateway   │────│  Data Pipeline   │────│ Prediction ML   │
-│   (FastAPI)     │    │   (Pandas)       │    │  (XGBoost)      │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
+┌─────────────────┐    ┌──────────────────┐    ┌──────────────────────┐
+│   API Gateway   │────│  Data Pipeline   │────│ Two-Stage Prediction │
+│   (FastAPI)     │    │   (Pandas)       │    │    (CatBoost)        │
+└─────────────────┘    └──────────────────┘    └──────────────────────┘
          │                       │                       │
          │              ┌──────────────────┐              │
          └──────────────│ Data Storage     │──────────────┘
@@ -51,18 +51,19 @@ The Predictive Gift Selection System follows a modular architecture with clear s
 
 ### 3. Machine Learning Layer
 **Location**: `/src/ml/`
-- **Framework**: XGBoost for regression
+- **Framework**: CatBoost with Two-Stage Architecture
 - **Responsibilities**:
-  - Model training and validation
-  - Feature engineering (including original 11 features and shop assortment features)
-  - Prediction generation
+  - Two-stage model: Binary classification + Count regression
+  - Feature engineering (11 base + shop features + new share/rank features)
+  - Native categorical handling
   - Model performance monitoring
 
 **Key Files**:
-- `model.py` - XGBoost model implementation
-- `features.py` - Feature engineering pipeline (handles base features and shop-level aggregates)
+- `model.py` - CatBoost model implementations (classifier & regressor)
+- `two_stage.py` - Two-stage prediction pipeline
+- `features.py` - Feature engineering (base, shop-level, share/rank features)
 - `trainer.py` - Model training orchestration
-- `predictor.py` - Prediction service
+- `predictor.py` - Combined prediction service
 - `evaluation.py` - Model metrics and validation
 
 ### 4. Configuration Layer
@@ -101,7 +102,7 @@ product_utility_type, product_type
 }
 ```
 
-### Three-Step API Processing Pipeline
+### Four-Step API Processing Pipeline (Two-Stage Model)
 
 ```
 Step 1: Raw Request Processing
@@ -117,10 +118,16 @@ Step 2: Data Reclassification
 │   └── Field mapping: JSON schema → CSV column names
 └── Output: Classified feature data matching historical structure
 
-Step 3: Prediction Generation
+Step 3: Two-Stage Prediction
 ├── Input: Classified feature data (CSV format)
-├── Processing: XGBoost model inference using historical patterns
-└── Output: {product_id, expected_qty}[]
+├── Stage 1: Binary classification - Will select? (CatBoostClassifier)
+├── Stage 2: Count regression - How many? (CatBoostRegressor with Poisson)
+└── Combined: P(select) × Expected_count
+
+Step 4: Response Generation
+├── Input: Combined predictions with confidence intervals
+├── Processing: Format results with uncertainty estimates
+└── Output: {product_id, expected_qty, confidence_interval}[]
 ```
 
 ### Data Field Mapping
@@ -147,10 +154,13 @@ valuePrice → (not in historical data)
 - **Real-time classification** for incoming requests
 
 ### Machine Learning Approach
-- **XGBoost Regressor** for demand prediction
-- **Scikit-learn metrics** for model evaluation
-- **Historical aggregation** as primary feature source
-- **Cross-validation** for model selection
+- **CatBoost Two-Stage Model** for count prediction
+  - Stage 1: Binary classification (selection probability)
+  - Stage 2: Poisson regression (count if selected)
+- **Native categorical handling** for high-cardinality features
+- **No log transformation** needed with Poisson loss
+- **Enhanced features**: Shop shares, ranks, interactions
+- **Stratified + Leave-One-Shop-Out CV** for robust evaluation
 
 ### API Design Patterns
 - **RESTful architecture** with clear resource endpoints
@@ -193,11 +203,12 @@ src/
 │   └── schemas/
 │       └── data_models.py   # Data structure definitions
 ├── ml/
-│   ├── model.py             # XGBoost model wrapper
-│   ├── features.py          # Feature engineering
+│   ├── model.py             # CatBoost model wrappers
+│   ├── two_stage.py         # Two-stage prediction logic
+│   ├── features.py          # Feature engineering (enhanced)
 │   ├── trainer.py           # Model training pipeline
-│   ├── predictor.py         # Prediction service
-│   └── evaluation.py        # Model metrics
+│   ├── predictor.py         # Combined prediction service
+│   └── evaluation.py        # Model metrics (MAPE, RMSE, R²)
 ├── config/
 │   ├── settings.py          # Application configuration
 │   └── model_config.py      # ML model parameters
@@ -217,21 +228,67 @@ final_df = structured_data.groupby([
 ]).agg({'qty_sold': 'sum'}).reset_index()
 ```
 
-### 2. Model Training Flow
+### 2. Two-Stage Model Training Flow
 ```python
-# XGBoost training pattern
-from xgboost import XGBRegressor
-model = XGBRegressor()
-model.fit(X_train, y_train)
-# Focus on metrics evaluation
+# Stage 1: Binary Classification
+from catboost import CatBoostClassifier
+classifier = CatBoostClassifier(
+    iterations=500,
+    cat_features=categorical_cols,
+    random_state=42
+)
+classifier.fit(X_train, y_binary, eval_set=(X_val, y_val_binary))
+
+# Stage 2: Count Regression (positives only)
+from catboost import CatBoostRegressor
+regressor = CatBoostRegressor(
+    iterations=1000,
+    loss_function='Poisson',  # No log transform needed
+    cat_features=categorical_cols,
+    random_state=42
+)
+# Train only on positive samples
+X_train_pos = X_train[y_train > 0]
+y_train_pos = y_train[y_train > 0]
+regressor.fit(X_train_pos, y_train_pos)
 ```
 
-### 3. API Processing Chain
+### 3. API Processing Chain with Two-Stage Prediction
 ```python
-# Three-step processing pattern
+# Four-step processing pattern
 raw_data = validate_request(request)
 classified_data = classify_and_transform(raw_data)
-predictions = generate_predictions(classified_data)
+
+# Two-stage prediction
+selection_probs = classifier.predict_proba(classified_data)[:, 1]
+expected_counts = regressor.predict(classified_data)
+final_predictions = selection_probs * expected_counts
+
+# Add confidence intervals
+predictions = add_confidence_intervals(final_predictions)
+```
+
+### 4. Enhanced Feature Engineering
+```python
+# New shop-level share features
+df['product_share_in_shop'] = (
+    df.groupby(['employee_shop', 'product_id'])['selection_count'].transform('sum') /
+    df.groupby('employee_shop')['selection_count'].transform('sum')
+)
+
+# Rank features
+df['product_rank_in_shop'] = df.groupby('employee_shop')['selection_count'].rank(
+    method='dense', ascending=False
+)
+
+# Interaction hashing (memory efficient)
+from sklearn.feature_extraction import FeatureHasher
+hasher = FeatureHasher(n_features=32, input_type='string')
+interactions = hasher.transform(
+    df[['employee_branch', 'product_main_category']].apply(
+        lambda x: f"{x[0]}_{x[1]}", axis=1
+    )
+)
 ```
 
 ## Scalability Considerations

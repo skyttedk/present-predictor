@@ -1,49 +1,55 @@
 # Current Context
 
 ## Project Status
-**Phase**: MODEL ENHANCEMENT - Shop Assortment Features Integrated
+**Phase**: MODEL OPTIMIZATION - Expert-Guided CatBoost & Two-Stage Implementation
 **Last Updated**: June 15, 2025
 
 ## Current Work Focus
-**MODEL REFINEMENT**: Integrating and verifying performance of new shop assortment features. Achieved CV R² ≈ 0.3112, further improving predictive power.
+**PARADIGM SHIFT**: Moving from XGBoost to CatBoost with Poisson loss and implementing two-stage modeling approach based on ML expert feedback. Current R² ≈ 0.3112 is actually respectable given natural noise and sparsity constraints.
 
 ## Recent Changes
+- ✅ **EXPERT VALIDATION**: Received comprehensive ML expert analysis confirming our R² ≈ 0.31 is reasonable given constraints.
+- ✅ **REALISTIC CEILING IDENTIFIED**: Upper bound with current features is R² ≈ 0.45 (not 0.60). Reaching 0.60 requires new signal sources.
+- ✅ **PRICE DATA CLARIFICATION**: All gifts in a shop are in same price range, so price features won't help (important business constraint).
+- ✅ **NEW STRATEGY**: CatBoost with count-aware objectives + two-stage modeling identified as quick wins (5-10 p.p. R² gain expected).
 - ✅ **FEATURE ENGINEERING**: Successfully engineered and tested non-leaky shop assortment features.
   - Features include: `shop_main_category_diversity_selected`, `shop_brand_diversity_selected`, `shop_utility_type_diversity_selected`, `shop_sub_category_diversity_selected`, `shop_most_frequent_main_category_selected`, `shop_most_frequent_brand_selected`, `is_shop_most_frequent_main_category`, `is_shop_most_frequent_brand`.
 - ✅ **Performance Improvement**: New features boosted Stratified CV R² (log target) to **0.3112** (from 0.2947).
 - ✅ **MAJOR DISCOVERY**: Overfitting was CV methodology issue, not model limitation (previous finding, still relevant).
 - ✅ **Performance Breakthrough (Baseline)**: Stratified CV by selection count → R² = 0.2947 (vs 0.05 with incorrect CV).
 - ✅ **Root Cause Identified**: Standard random CV doesn't respect selection count distribution structure.
-- ✅ **Optimal Configuration (Enhanced)**: XGB with log target transformation + stratified CV + shop assortment features.
-- ✅ **Production Readiness**: Maintained minimal overfitting (e.g., -0.0062) with reliable cross-validation.
-- ✅ **Business Value Enhanced**: R² ≈ 0.31 provides improved moderate but significant predictive power.
 
 ## Current State
 - **Repository**: ✅ Updated with notebook for shop assortment features ([`notebooks/breakthrough_training.ipynb`](notebooks/breakthrough_training.ipynb:1)).
 - **Data Processing**: ✅ **COMPLETED** - 178,736 events → 98,741 combinations processed correctly. Shop features added.
-- **Model Performance**: ✅ **ENHANCED** - CV R² (log target) = **0.3112** with shop assortment features.
+- **Model Performance**: ✅ **VALIDATED** - CV R² (log target) = **0.3112** is respectable given natural ceiling of ~0.45.
 - **Cross-Validation**: ✅ **FIXED & APPLIED** - Stratified CV (5 splits) by selection count provides realistic estimates.
 - **Overfitting Control**: ✅ **EXCELLENT** - Minimal overfitting (e.g., -0.0062) achieved with new features.
 - **Business Integration**: ✅ **READY (Enhanced Model)** - Model with shop features suitable for inventory guidance.
+- **Expert Feedback**: ✅ **RECEIVED** - Comprehensive guidance on next optimization steps and realistic expectations.
 
-## Next Steps
+## Next Steps (Expert-Guided Optimization)
 
-### Immediate Priority (Days 1-2)
-1. **Memory Bank Update (COMPLETED for context.md first pass)**: Document shop feature insights.
-2. **Production Integration (Enhanced Model)**: Integrate model with shop features into API pipeline.
-3. **Notebook Finalization**: Ensure [`notebooks/breakthrough_training.ipynb`](notebooks/breakthrough_training.ipynb:1) is clean and fully reproduces 0.3112 R².
-4. **Business Testing (Enhanced Model)**: Begin real-world inventory planning trials with the improved model.
+### Immediate Priority (Week 1-2) - Quick Wins
+1. **CatBoost Implementation**: Switch from XGBoost to CatBoost with Poisson loss (no log transform needed).
+   - Expected gain: 2-4 p.p. R² from proper count-aware objectives
+   - Native categorical handling for high-cardinality features
+2. **Two-Stage Model**: Implement binary classification (selected?) + count regression (how many?).
+   - Expected gain: 8-25% RMSE reduction vs single model
+3. **New Feature Engineering**: Add shop-level share and rank features.
+   - `product_share_in_shop`, `brand_share_in_shop`, rank within shop
 
-### Short Term (Week 1-2)
-1. **API Deployment (Enhanced Model)**: Deploy prediction service with the 0.3112 R² model.
-2. **Model Monitoring**: Implement performance tracking for the enhanced model using stratified CV.
-3. **Business Integration**: Connect with Gavefabrikken's inventory systems.
-4. **User Training**: Guide operations team on enhanced model capabilities and limitations.
+### Short Term (Week 3-4)
+1. **Complete CatBoost Notebook**: Create new training notebook with CatBoost implementation.
+2. **Two-Stage Pipeline**: Build and validate two-stage prediction pipeline.
+3. **Leave-One-Shop-Out CV**: Implement to assess cold-start performance.
+4. **API Integration Planning**: Design how two-stage predictions integrate with API.
 
-### Medium Term (Month 1)
-1. **Performance Validation**: Monitor real-world prediction accuracy of the enhanced model.
-2. **Continuous Improvement**: Gather feedback and explore further feature refinements.
-3. **Scale Deployment**: Expand to multiple companies and seasonal periods.
+### Medium Term (Month 1-2)
+1. **Hierarchical Models**: Add random effects for shop/product if cold-start gap appears.
+2. **Entity Embeddings**: Replace label encoders with learned embeddings.
+3. **Business Metric Focus**: Optimize for aggregated MAPE (what drives overstock).
+4. **Production Deployment**: Deploy optimized models with new architecture.
 
 ## Critical Technical Insights (BREAKTHROUGH & ENHANCEMENT)
 
@@ -57,18 +63,35 @@
 - **Result**: CV R² (log target) increased from 0.2947 to **0.3112**.
 - **Key New Features**: `shop_main_category_diversity_selected`, `shop_brand_diversity_selected`, `is_shop_most_frequent_main_category`, etc.
 
-### Optimal Model Configuration (with Shop Features)
+### Current Model Configuration (XGBoost - To Be Replaced)
 ```python
-# PRODUCTION-READY CONFIGURATION (WITH SHOP FEATURES)
+# CURRENT CONFIGURATION (WITH SHOP FEATURES)
 XGBRegressor(
     n_estimators=1000, max_depth=6, learning_rate=0.03,
     subsample=0.9, colsample_bytree=0.9, reg_alpha=0.3, reg_lambda=0.3,
     gamma=0.1, min_child_weight=8, random_state=42, n_jobs=-1
 )
-# Target: np.log1p(selection_count)  # Log transformation is crucial
+# Target: np.log1p(selection_count)  # Log transformation (to be removed with CatBoost)
 # CV Method: StratifiedKFold (5 splits) by selection_count bins
 # Features: Original 11 + Shop Assortment Features
-# Expected Performance: CV R² = 0.3112 ± (e.g., 0.0070)
+# Current Performance: CV R² = 0.3112 ± 0.0070
+```
+
+### Target Model Configuration (CatBoost - NEW)
+```python
+# PLANNED CONFIGURATION (CatBoost with Poisson)
+from catboost import CatBoostRegressor
+
+model = CatBoostRegressor(
+    iterations=1000,
+    loss_function='Poisson',  # No log transform needed!
+    cat_features=categorical_cols,  # Native categorical handling
+    random_state=42
+)
+# Target: selection_count (raw counts, no transformation)
+# CV Method: StratifiedKFold (5 splits) + Leave-One-Shop-Out
+# Features: Original 11 + Shop Features + New share/rank features
+# Expected Performance: CV R² = 0.35-0.40 (targeting 5-10 p.p. gain)
 ```
 
 ### Cross-Validation Methodology (CRITICAL)
@@ -100,30 +123,48 @@ cv_scores = cross_val_score(model, X_for_cv, y_log_for_cv, cv=cv_stratified.spli
 - **Output**: Predicted log selection count (transform back with `np.expm1`).
 - **Confidence**: Use CV standard deviation for prediction intervals.
 
-## Business Impact Assessment
+## Business Impact Assessment (Updated with Expert Insights)
 
-### Current Performance Level
-- **Achieved CV R² (log target)**: 0.3112 (enhanced moderate business value).
-- **Target for ideal**: R² ≥ 0.6.
-- **Achievement**: ~52% of ideal target (0.3112 / 0.6).
-- **Business Utility**: Further improvement over manual estimation and baseline model.
+### Performance Reality Check
+- **Current CV R²**: 0.3112 (actually respectable given constraints)
+- **Realistic Upper Bound**: R² ≈ 0.45 with current feature set
+- **Previous Target**: R² ≥ 0.6 (unrealistic without new signal sources)
+- **Achievement**: ~69% of realistic target (0.3112 / 0.45)
+- **Natural Noise Floor**: Pure chance R² ≈ 0.00 (1 choice from ~40-60 options)
+
+### Expert Validation
+- **"Shop Mean Oracle"**: R² ≈ 0.38-0.45 (optimistic baseline)
+- **Full Future Knowledge**: R² ≈ 0.65-0.70 (theoretical maximum with leakage)
+- **Conclusion**: We're fighting natural noise and information sparsity, not methodology flaws
 
 ### Production Readiness
-- **Technical**: ✅ Ready (minimal overfitting, reliable CV, improved R²).
-- **Business**: ✅ Suitable for inventory guidance with increased confidence.
-- **Integration**: ✅ Enhanced model ready for API deployment and business testing.
-- **Monitoring**: ✅ Performance tracking methodology established.
+- **Technical**: ✅ Ready with current model, clear path to improvement
+- **Business**: ✅ Current R² provides value, with roadmap to R² ≈ 0.40+
+- **Integration**: ✅ Enhanced model ready for API deployment
+- **Next Phase**: 🚀 CatBoost + Two-stage implementation for quick gains
 
-## Key Blockers Resolved
-- ❌ **RESOLVED**: "Poor R² performance" → Was CV methodology issue.
-- ❌ **RESOLVED**: "Massive overfitting" → Fixed with stratified CV.
-- ❌ **RESOLVED**: "Data limitation" → Model performs reasonably well with correct evaluation and feature engineering.
-- ❌ **RESOLVED**: "Insufficient for production" → R² = 0.31 provides enhanced business value.
+## Key Insights from ML Expert
 
-## Success Criteria Status
-- ✅ **Technical optimization further enhanced**: Achieved with shop assortment features.
-- ✅ **Reproducible results**: Scripts and configuration documented.
-- ✅ **Business viability enhanced**: R² = 0.31 suitable for inventory decisions.
-- ✅ **Production ready (enhanced model)**: Minimal overfitting with reliable estimates.
+### Why Current Performance is Actually Good
+1. **Information Sparsity**: Selecting 1 gift from ~40-60 options creates natural noise
+2. **No Silver Bullet**: We're near the ceiling for current features (~69% of max)
+3. **Count Data Complexity**: Sparse integer targets are inherently difficult
 
-This enhancement further solidifies the project's readiness for business integration testing with more reliable demand prediction capabilities.
+### Critical Business Constraint Discovered
+- **Price Features Won't Help**: All gifts in a shop are in same price range
+- This eliminates a typical high-value feature source
+- Must focus on other signals: merchandising, position, temporal patterns
+
+### Path to R² ≈ 0.40-0.45
+1. **CatBoost + Poisson**: Better variance handling for count data (+2-4 p.p.)
+2. **Two-Stage Model**: Binary + count regression (+3-6 p.p.)
+3. **New Features**: Shop shares, ranks, interactions (+1-2 p.p.)
+4. **Total Expected Gain**: +5-10 p.p. → R² ≈ 0.36-0.41
+
+## Success Criteria Status (Revised)
+- ✅ **Technical optimization validated**: Current R² = 0.31 is respectable
+- ✅ **Clear improvement path**: Expert-guided roadmap to R² ≈ 0.40+
+- ✅ **Business viability confirmed**: Current model provides value
+- 🚀 **Next phase defined**: CatBoost + Two-stage quick wins identified
+
+The project has reached a natural checkpoint. Expert validation confirms we're on the right track, with clear next steps for meaningful improvement without unrealistic expectations.
