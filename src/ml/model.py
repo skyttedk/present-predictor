@@ -12,6 +12,7 @@ import pandas as pd
 import numpy as np
 
 from xgboost import XGBRegressor
+from xgboost.callback import EarlyStopping
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, mean_absolute_percentage_error
 
@@ -107,8 +108,7 @@ class DemandPredictor:
                 self.model.fit(
                     X_train, y_train,
                     eval_set=[(X_train, y_train), (X_val, y_val)],
-                    eval_metric=['rmse', 'mae'],
-                    early_stopping_rounds=50,  # More patience for large datasets
+                    callbacks=[EarlyStopping(rounds=50)],  # More patience for large datasets
                     verbose=True if dataset_size > 50000 else False
                 )
             else:
@@ -116,8 +116,7 @@ class DemandPredictor:
                 self.model.fit(
                     X_train, y_train,
                     eval_set=[(X_val, y_val)],
-                    eval_metric='rmse',
-                    early_stopping_rounds=20,
+                    callbacks=[EarlyStopping(rounds=20)],
                     verbose=False
                 )
             
