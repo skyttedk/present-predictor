@@ -10,7 +10,7 @@
 ## Recent Changes
 - ✅ **API KEY AUTHENTICATION IMPLEMENTED**: Added API key authentication (`X-API-Key` header) to the `/test` endpoint in [`src/api/main.py`](src/api/main.py:1) using [`src/database/users.py`](src/database/users.py:1).
 - ✅ **API DEVELOPMENT STARTED**: Initial FastAPI application created with a `/test` endpoint in [`src/api/main.py`](src/api/main.py:1).
-- ✅ **DATABASE REFACTORING (PRODUCT TO PRESENT)**: Renamed `products.py` to `presents.py` ([`src/database/presents.py`](src/database/presents.py:1)) and updated `product_attributes` table to `present_attributes` in schema ([`src/database/schema.sql`](src/database/schema.sql:1)) splitting `raw_description` into `present_name`, `model_name`, `mode_no`.
+- ✅ **DATABASE REFACTORING (PRODUCT TO PRESENT)**: Renamed `products.py` to `presents.py` ([`src/database/presents.py`](src/database/presents.py:1)) and updated `product_attributes` table to `present_attributes` in schema ([`src/database/schema.sql`](src/database/schema.sql:1)) splitting `raw_description` into `present_name`, `model_name`, `model_no`.
 - ✅ **DATABASE IMPLEMENTATION COMPLETED**: Core database logic ([`src/database/db.py`](src/database/db.py:1)), schema ([`src/database/schema.sql`](src/database/schema.sql:1)), user management ([`src/database/users.py`](src/database/users.py:1)), API logging ([`src/database/api_logs.py`](src/database/api_logs.py:1)), present attribute caching ([`src/database/presents.py`](src/database/presents.py:1)), and CLI tools ([`src/database/cli.py`](src/database/cli.py:1)) are now implemented.
 - ✅ **DATABASE IMPLEMENTATION PLANNED**: Complete database backend design documented in [`docs/database_implementation.md`](docs/database_implementation.md:1)
   - Three core tables: user (API authentication), user_api_call_log (request tracking), present_attributes (classification cache)
@@ -78,7 +78,7 @@
 1. **API Development with Database**: 🚀 **IN PROGRESS** - Initial test endpoint created.
    - ✅ Integrate authentication middleware using [`src/database/users.py`](src/database/users.py:1) (Implemented for `/test` endpoint).
    - Add request/response logging using [`src/database/api_logs.py`](src/database/api_logs.py:1).
-   - Implement present classification caching using [`src/database/presents.py`](src/database/presents.py:1).
+   - Implement present classification caching using [`src/database/presents.py`](src/database/presents.py:1) (The `/addPresent` endpoint now adds entries to `present_attributes` with 'pending_classification' status).
 2. **Database Implementation**: ✅ **COMPLETED**
    - Core database module and schema created.
    - User management and API key system implemented.

@@ -29,9 +29,9 @@ The Predictive Gift Selection System follows a modular architecture with clear s
   - Error handling
 
 **Key Files**:
-- `main.py` - FastAPI application entry point
-- `endpoints/` - API route definitions
-- `schemas/` - Pydantic models for request/response validation
+- `main.py` - FastAPI application entry point (includes `/test`, `/addPresent`)
+- `endpoints/` - API route definitions (e.g., `/predict`)
+- `schemas/` - Pydantic models for request/response validation (e.g., `AddPresentRequest`, `PredictionRequest`)
 - `middleware/` - Request/response processing
 
 ### 2. Data Pipeline Layer
@@ -109,15 +109,21 @@ product_utility_type, product_type
 ### Four-Step API Processing Pipeline (Two-Stage Model)
 
 ```
-Step 1: Raw Request Processing
+Step 0: Add Present (Optional, via /addPresent endpoint)
+├── Input: {present_name, present_vendor, model_name, model_no}
+├── Processing: Calculate MD5 hash, check if exists in `present_attributes`.
+│             If not, add to `present_attributes` with 'pending_classification' status.
+└── Output: Confirmation or existing present details.
+
+Step 1: Raw Request Processing (for /predict endpoint)
 ├── Input: {branch_no, gifts[{present_name, present_vendor, model_name, model_no}], employees[{name}]}
 ├── Validation: Request schema validation
 └── Output: Validated raw data
 
 Step 2: Data Reclassification
-├── Input: Raw validated data
+├── Input: Validated raw data (gifts will be looked up in `present_attributes` or classified if status is 'pending_classification' or missing)
 ├── Processing:
-│   ├── Gift details (name, vendor, model, model_no) → JSON schema attributes (LLM/rule-based)
+│   ├── Gift details (name, vendor, model, model_no) → JSON schema attributes (LLM/rule-based if not cached or pending)
 │   ├── Employee name → gender classification
 │   └── Field mapping: JSON schema → CSV column names
 └── Output: Classified feature data matching historical structure
@@ -178,7 +184,8 @@ valuePrice → (not in historical data)
 ```
 Historical Data → Preprocessor → Feature Engineering → Model Training
                               ↘                    ↗
-API Request → Classifier → Feature Extraction → Prediction
+API Request (/predict) → Classifier → Feature Extraction → Prediction
+API Request (/addPresent) → Add to `present_attributes` (for future classification/lookup)
 ```
 
 ### Service Integration
@@ -194,7 +201,8 @@ src/
 ├── api/
 │   ├── main.py              # FastAPI app entry point
 │   ├── endpoints/
-│   │   └── predictions.py   # Prediction endpoints
+│   │   └── predictions.py   # Prediction endpoints (e.g. /predict)
+│   │   └── presents.py      # Present management endpoints (e.g. /addPresent - though currently in main.py)
 │   ├── schemas/
 │   │   ├── requests.py      # API request models
 │   │   └── responses.py     # API response models

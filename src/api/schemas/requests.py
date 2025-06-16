@@ -4,7 +4,7 @@ Defines the structure for incoming API requests.
 """
 
 from typing import List
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator, field_validator
 
 
 class GiftItem(BaseModel):
@@ -102,6 +102,36 @@ class PredictionRequest(BaseModel):
             }
         }
 
+class AddPresentRequest(BaseModel):
+    """Model for adding a new present for classification."""
+    present_name: str = Field(..., description="Name of the present", min_length=1)
+    model_name: str = Field(..., description="Model name of the present", min_length=1)
+    model_no: str = Field(..., description="Model number of the present", min_length=1)
+    vendor: str = Field(..., description="Vendor of the present", min_length=1)
+
+    @validator('*', pre=True, always=True)
+    def strip_strings(cls, v):
+        if isinstance(v, str):
+            return v.strip()
+        return v
+
+    @field_validator('present_name', 'model_name', 'model_no', 'vendor', mode='before')
+    def check_not_empty(cls, v, info):
+        if isinstance(v, str) and not v.strip():
+            raise ValueError(f"{info.field_name} cannot be empty")
+        if v is None: # Handles cases where field might be None if not caught by Field(...)
+            raise ValueError(f"{info.field_name} cannot be None")
+        return v
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "present_name": "Luxury Coffee Mug",
+                "model_name": "Grande Series",
+                "model_no": "CMG-500X",
+                "vendor": "Premium Homewares"
+            }
+        }
 
 class BatchPredictionRequest(BaseModel):
     """Model for batch prediction requests (future enhancement)."""
