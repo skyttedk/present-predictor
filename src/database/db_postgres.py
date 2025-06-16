@@ -11,10 +11,12 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Get database URL from environment, handle Heroku's postgres:// -> postgresql:// issue
-DATABASE_URL = os.getenv("DATABASE_URL")
-if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+def get_database_url():
+    """Get database URL from environment, handle Heroku's postgres:// -> postgresql:// issue."""
+    database_url = os.getenv("DATABASE_URL")
+    if database_url and database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql://", 1)
+    return database_url
 
 @contextmanager
 def get_db():
@@ -24,10 +26,11 @@ def get_db():
     Yields:
         psycopg2.connection: Database connection with RealDictCursor
     """
-    if not DATABASE_URL:
+    database_url = get_database_url()
+    if not database_url:
         raise ValueError("DATABASE_URL environment variable not set")
     
-    parsed = urlparse(DATABASE_URL)
+    parsed = urlparse(database_url)
     
     try:
         conn = psycopg2.connect(
@@ -126,7 +129,8 @@ def execute_many(query: str, params_list: List[tuple]) -> int:
 
 def check_database_exists() -> bool:
     """Check if database tables exist."""
-    if not DATABASE_URL:
+    database_url = get_database_url()
+    if not database_url:
         return False
 
     try:

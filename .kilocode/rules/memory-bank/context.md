@@ -1,13 +1,23 @@
 # Current Context
 
 ## Project Status
-**Phase**: API DEVELOPMENT STARTED - Integrating with Database Backend
-**Last Updated**: June 16, 2025
+**Phase**: API DEVELOPMENT WITH POSTGRES - Database migrated to PostgreSQL
+**Last Updated**: June 17, 2025
 
 ## Current Work Focus
-**API DEVELOPMENT STARTED**: The initial FastAPI application ([`src/api/main.py`](src/api/main.py:1)) has been created with a test endpoint. The focus is now on building out the API endpoints and integrating them with the existing database backend.
+**DATABASE MIGRATION COMPLETED**: Successfully migrated from SQLite to PostgreSQL. All database modules have been updated to use PostgreSQL syntax and placeholders.
 
 ## Recent Changes
+- ✅ **POSTGRESQL MIGRATION COMPLETED**:
+  - Updated [`src/database/db_factory.py`](src/database/db_factory.py:1) to use PostgreSQL exclusively
+  - Modified all database modules to use PostgreSQL placeholders (`%s` instead of `?`)
+  - Updated SQL queries for PostgreSQL compatibility:
+    - `INSERT OR REPLACE` → `INSERT ... ON CONFLICT`
+    - `datetime('now')` → `CURRENT_TIMESTAMP`
+    - Proper `INTERVAL` syntax for date calculations
+    - Quoted `"user"` table name (reserved word in PostgreSQL)
+  - Removed SQLite files (`db.py`, `schema.sql`)
+  - Updated [`.env.example`](.env.example:1) to reflect PostgreSQL requirement
 - ✅ **OPENAI INTEGRATION FULLY OPERATIONAL**: Fixed API key loading issues and HTTP client errors. Classification system now working end-to-end.
 - ✅ **CLI RESET COMMAND ADDED**: Added `reset-failed-presents` command to [`src/database/cli.py`](src/database/cli.py:1) for resetting failed classification attempts.
 - ✅ **API KEY LOADING FIXED**: Resolved pydantic-settings issues by adding explicit `load_dotenv()` with path and fallback mechanism in [`src/config/settings.py`](src/config/settings.py:1) and [`src/data/openai_client.py`](src/data/openai_client.py:1).
@@ -50,21 +60,21 @@
 - ✅ **Root Cause Identified**: Standard random CV doesn't respect selection count distribution structure.
 
 ## Current State
-- **Repository**: 🚀 Updated with the initial CatBoost implementation. The XGBoost development work remains as a baseline.
+- **Repository**: 🚀 Updated with PostgreSQL database backend. The CatBoost implementation and XGBoost development work remain.
 - **Data Processing**: ✅ **COMPLETED** - 178,736 events → 98,741 combinations processed correctly. Shop features added.
 - **Model Performance**: ⭐ **EXCELLENT - OPTIMIZED CatBoost CV R² = 0.5894** (mean of 5-fold stratified CV, original scale, non-leaky features, Optuna tuned). Single validation split R²=0.6435. This performance is very strong, robust, and significantly exceeds initial expectations.
 - **Cross-Validation**: ✅ Stratified 5-Fold CV successfully implemented and validated for the optimized CatBoost model.
 - **Overfitting Control**: ✅ **EXCELLENT** - Minimal overfitting observed with the tuned CatBoost model and non-leaky features.
-- **Business Integration**: ✅ **READY FOR API INTEGRATION** - The current high-performing CatBoost model provides significant business value and database backend is now planned.
+- **Business Integration**: ✅ **READY FOR API INTEGRATION** - The current high-performing CatBoost model provides significant business value and database backend is now PostgreSQL.
 - **Expert Feedback**: ✅ **RECEIVED** - Comprehensive guidance on next optimization steps and realistic expectations.
-- **Database Backend**: ✅ **IMPLEMENTED** - SQLite database with user management, API logging, product classification caching, and CLI tools is implemented.
+- **Database Backend**: ✅ **MIGRATED TO POSTGRESQL** - Full PostgreSQL implementation with user management, API logging, product classification caching, and CLI tools.
 
 ## Database Backend Summary
 
 ### Architecture
-- **Direct SQLite**: No ORM overhead, using Python's built-in sqlite3 module
-- **Three Core Tables**: 
-  - `user`: API authentication with hashed keys
+- **PostgreSQL Database**: Using psycopg2 for direct PostgreSQL access
+- **Three Core Tables**:
+  - `"user"`: API authentication with hashed keys
   - `user_api_call_log`: Comprehensive request/response logging
   - `present_attributes`: OpenAI classification caching
 - **CLI Management**: Full-featured command-line tools for user and database management
@@ -74,6 +84,7 @@
 - **Performance**: Indexed queries, connection pooling, batch operations
 - **Analytics**: Built-in statistics for API usage, errors, and cache performance
 - **Maintenance**: Automated cleanup, cache invalidation, log rotation
+- **PostgreSQL Specific**: Proper handling of reserved words, INTERVAL syntax, ON CONFLICT clauses
 
 ### Integration Points
 - **FastAPI Middleware**: Authentication and logging hooks
@@ -87,10 +98,10 @@
    - ✅ Integrate authentication middleware using [`src/database/users.py`](src/database/users.py:1) (Implemented for `/test` endpoint).
    - Add request/response logging using [`src/database/api_logs.py`](src/database/api_logs.py:1).
    - Implement present classification caching using [`src/database/presents.py`](src/database/presents.py:1) (The `/addPresent` endpoint now adds entries to `present_attributes` with 'pending_classification' status).
-2. **Database Implementation**: ✅ **COMPLETED**
-   - Core database module and schema created.
-   - User management and API key system implemented.
-   - CLI tools for database administration implemented.
+2. **PostgreSQL Migration**: ✅ **COMPLETED**
+   - All database modules updated for PostgreSQL compatibility
+   - SQLite files removed
+   - PostgreSQL-specific syntax implemented
 3. **Two-Stage Model**: ⏸️ **PAUSED** - Further optimization is paused to focus on API development.
 
 ### Short Term (Next 2 Weeks)
@@ -116,11 +127,12 @@
 
 ## Critical Technical Insights (BREAKTHROUGH & ENHANCEMENT)
 
-### Database Design Decisions
-- **No ORM**: Direct SQL for simplicity and performance
-- **Hashed API Keys**: Security without complexity
-- **JSON Payloads**: Flexible request/response logging
-- **Present Hash**: MD5 hash of combined present_name, model_name, model_no for cache matching (primary key for `present_attributes`)
+### PostgreSQL Design Decisions
+- **Direct psycopg2**: No ORM overhead, direct SQL control
+- **Parameter Style**: Using `%s` placeholders for PostgreSQL
+- **Reserved Words**: Quoting "user" table name
+- **Date/Time**: Using CURRENT_TIMESTAMP and INTERVAL syntax
+- **Upserts**: Using ON CONFLICT for INSERT OR REPLACE functionality
 
 ### API Integration Strategy
 - **Middleware Pattern**: Clean separation of concerns
@@ -143,7 +155,7 @@ model = CatBoostRegressor(
 # CV Method: StratifiedKFold (5 splits) + Leave-One-Shop-Out
 # Features: Original 11 + Existing Shop Features + Interaction Hashes (30 non-leaky features)
 # Achieved Performance: Optimized CV R² = 0.5894 (original scale, mean of 5-fold). Single split validation R² = 0.6435.
-# Next Step: API Development and integration with the implemented database backend.
+# Next Step: API Development and integration with PostgreSQL backend.
 ```
 
 ### Performance Results (VERIFIED & ENHANCED)
@@ -162,14 +174,14 @@ model = CatBoostRegressor(
 
 ### Production Readiness
 - **Model**: ✅ **EXCELLENT** - CatBoost performance validated and robust
-- **Database**: ✅ **IMPLEMENTED** - SQLite database is fully implemented.
+- **Database**: ✅ **MIGRATED TO POSTGRESQL** - Full PostgreSQL implementation complete.
 - **API**: 🚀 **IN PROGRESS** - Initial test endpoint created in [`src/api/main.py`](src/api/main.py:1).
 - **Integration**: 🎯 **DESIGNED** - Clear integration patterns established
 
 ## Success Criteria Status (Revised)
 - ✅ **Model optimization validated**: CV R² = **0.5894** exceeds all targets
-- ✅ **Database backend implemented**: Comprehensive SQLite implementation is complete.
+- ✅ **Database backend migrated**: Comprehensive PostgreSQL implementation is complete.
 - 🚀 **API development in progress**: Initial FastAPI application created. Next: authentication, logging, and caching.
-- 🎯 **Production path clear**: Model → Database → API → Deployment
+- 🎯 **Production path clear**: Model → PostgreSQL → API → Deployment
 
-The project has achieved excellent model performance and the database backend is now implemented. The next critical step is the development of the API layer and its integration with the database.
+The project has achieved excellent model performance and the database backend has been successfully migrated to PostgreSQL. The next critical step is the development of the API layer and its integration with the PostgreSQL database.

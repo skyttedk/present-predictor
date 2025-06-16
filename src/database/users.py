@@ -40,14 +40,14 @@ def create_user(username: str) -> Dict[str, str]:
         ValueError: If username already exists
     """
     # Check if username already exists
-    existing = db_factory.execute_query("SELECT id FROM user WHERE username = ?", (username,))
+    existing = db_factory.execute_query('SELECT id FROM "user" WHERE username = %s', (username,))
     if existing:
         raise ValueError(f"Username '{username}' already exists")
 
     api_key = generate_api_key()
     hashed_key = hash_api_key(api_key)
 
-    query = "INSERT INTO user (username, api_key) VALUES (?, ?)"
+    query = 'INSERT INTO "user" (username, api_key) VALUES (%s, %s)'
     user_id = db_factory.execute_write(query, (username, hashed_key))
 
     logger.info(f"Created user: {username} (ID: {user_id})")
@@ -71,8 +71,8 @@ def authenticate_user(api_key: str) -> Optional[Dict]:
     hashed_key = hash_api_key(api_key)
     query = """
         SELECT id, username, is_active, created_at, updated_at
-        FROM user
-        WHERE api_key = ? AND is_active = 1
+        FROM "user"
+        WHERE api_key = %s AND is_active = 1
     """
     users = db_factory.execute_query(query, (hashed_key,))
 
@@ -96,7 +96,7 @@ def list_users(active_only: bool = False) -> List[Dict]:
     """
     query = """
         SELECT id, username, created_at, updated_at, is_active
-        FROM user
+        FROM "user"
     """
     if active_only:
         query += " WHERE is_active = 1"
@@ -114,7 +114,7 @@ def deactivate_user(username: str) -> bool:
     Returns:
         True if user was deactivated, False if user not found
     """
-    query = "UPDATE user SET is_active = 0 WHERE username = ?"
+    query = 'UPDATE "user" SET is_active = 0 WHERE username = %s'
     affected = db_factory.execute_write(query, (username,))
 
     if affected > 0:
@@ -132,7 +132,7 @@ def reactivate_user(username: str) -> bool:
     Returns:
         True if user was reactivated, False if user not found
     """
-    query = "UPDATE user SET is_active = 1 WHERE username = ?"
+    query = 'UPDATE "user" SET is_active = 1 WHERE username = %s'
     affected = db_factory.execute_write(query, (username,))
 
     if affected > 0:
@@ -151,14 +151,14 @@ def regenerate_api_key(username: str) -> Optional[str]:
         New API key if successful, None if user not found
     """
     # Check if user exists
-    users = db_factory.execute_query("SELECT id FROM user WHERE username = ?", (username,))
+    users = db_factory.execute_query('SELECT id FROM "user" WHERE username = %s', (username,))
     if not users:
         return None
 
     new_api_key = generate_api_key()
     hashed_key = hash_api_key(new_api_key)
 
-    query = "UPDATE user SET api_key = ? WHERE username = ?"
+    query = 'UPDATE "user" SET api_key = %s WHERE username = %s'
     affected = db_factory.execute_write(query, (hashed_key, username))
 
     if affected > 0:

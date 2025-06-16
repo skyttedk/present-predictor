@@ -37,7 +37,7 @@ def log_api_call(
         INSERT INTO user_api_call_log
         (user_id, api_route, request_payload, response_payload,
          response_status_code, response_time_ms, error_message)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
     """
 
     log_id = db_factory.execute_write(query, (
@@ -75,8 +75,8 @@ def get_user_api_stats(user_id: int, days: int = 30) -> Dict[str, Any]:
             COUNT(CASE WHEN response_status_code >= 400 THEN 1 END) as error_count,
             COUNT(DISTINCT api_route) as unique_endpoints
         FROM user_api_call_log
-        WHERE user_id = ?
-        AND date_time >= datetime('now', '-' || ? || ' days')
+        WHERE user_id = %s
+        AND date_time >= CURRENT_TIMESTAMP - INTERVAL '%s days'
     """
 
     stats_list = db_factory.execute_query(query, (user_id, days))
@@ -90,8 +90,8 @@ def get_user_api_stats(user_id: int, days: int = 30) -> Dict[str, Any]:
             COUNT(*) as call_count,
             AVG(response_time_ms) as avg_response_time
         FROM user_api_call_log
-        WHERE user_id = ?
-        AND date_time >= datetime('now', '-' || ? || ' days')
+        WHERE user_id = %s
+        AND date_time >= CURRENT_TIMESTAMP - INTERVAL '%s days'
         GROUP BY api_route
         ORDER BY call_count DESC
     """
@@ -122,7 +122,7 @@ def get_system_api_stats(hours: int = 24) -> Dict[str, Any]:
             COUNT(CASE WHEN response_status_code >= 400 THEN 1 END) as error_count,
             COUNT(CASE WHEN response_status_code >= 500 THEN 1 END) as server_error_count
         FROM user_api_call_log
-        WHERE date_time >= datetime('now', '-' || ? || ' hours')
+        WHERE date_time >= CURRENT_TIMESTAMP - INTERVAL '%s hours'
     """
 
     stats_list = db_factory.execute_query(query, (hours,))
@@ -134,9 +134,9 @@ def get_system_api_stats(hours: int = 24) -> Dict[str, Any]:
             u.username,
             COUNT(*) as call_count
         FROM user_api_call_log l
-        JOIN user u ON l.user_id = u.id
-        WHERE l.date_time >= datetime('now', '-' || ? || ' hours')
-        GROUP BY l.user_id
+        JOIN "user" u ON l.user_id = u.id
+        WHERE l.date_time >= CURRENT_TIMESTAMP - INTERVAL '%s hours'
+        GROUP BY l.user_id, u.username
         ORDER BY call_count DESC
         LIMIT 10
     """
@@ -169,10 +169,10 @@ def get_recent_errors(limit: int = 100) -> List[Dict[str, Any]]:
             l.error_message,
             l.request_payload
         FROM user_api_call_log l
-        JOIN user u ON l.user_id = u.id
+        JOIN "user" u ON l.user_id = u.id
         WHERE l.response_status_code >= 400
         ORDER BY l.date_time DESC
-        LIMIT ?
+        LIMIT %s
     """
 
     errors = db_factory.execute_query(query, (limit,))
@@ -200,7 +200,7 @@ def cleanup_old_logs(days: int = 90) -> int:
     """
     query = """
         DELETE FROM user_api_call_log
-        WHERE date_time < datetime('now', '-' || ? || ' days')
+        WHERE date_time < CURRENT_TIMESTAMP - INTERVAL '%s days'
     """
 
     deleted = db_factory.execute_write(query, (days,))

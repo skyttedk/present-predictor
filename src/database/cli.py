@@ -7,12 +7,18 @@ from tabulate import tabulate
 from pathlib import Path
 import pandas as pd
 from datetime import datetime, timezone
+from dotenv import load_dotenv
+import os
+
+# Load environment variables from .env file BEFORE importing database modules
+load_dotenv()
 
 # Ensure src directory is in Python path for relative imports
 # This might be needed if running cli.py directly for testing,
 # but generally, it's better to run as a module: python -m src.database.cli
 try:
-    from .db import init_database, check_database_exists, get_db
+    # Import after loading .env to ensure DATABASE_URL is available
+    from .db_factory import init_database, check_database_exists, get_db
     from .users import (
         create_user, list_users, deactivate_user,
         reactivate_user, regenerate_api_key
@@ -31,7 +37,7 @@ except ImportError:
     if os.path.basename(os.getcwd()) == "database" and \
        os.path.basename(os.path.dirname(os.getcwd())) == "src":
         sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..", "..")))
-    from src.database.db import init_database, check_database_exists, get_db
+    from src.database.db_factory import init_database, check_database_exists, get_db
     from src.database.users import (
         create_user, list_users, deactivate_user,
         reactivate_user, regenerate_api_key

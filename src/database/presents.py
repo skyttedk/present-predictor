@@ -86,13 +86,33 @@ def cache_present_classification(
     present_hash = get_present_hash(present_name, model_name, model_no)
 
     query = """
-        INSERT OR REPLACE INTO present_attributes
+        INSERT INTO present_attributes
         (present_hash, present_name, present_vendor, model_name, model_no,
          thread_id, run_id,
          item_main_category, item_sub_category, color, brand, vendor,
          value_price, target_demographic, utility_type, durability, usage_type,
          classification_status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (present_hash)
+        DO UPDATE SET
+            present_name = EXCLUDED.present_name,
+            present_vendor = EXCLUDED.present_vendor,
+            model_name = EXCLUDED.model_name,
+            model_no = EXCLUDED.model_no,
+            thread_id = EXCLUDED.thread_id,
+            run_id = EXCLUDED.run_id,
+            item_main_category = EXCLUDED.item_main_category,
+            item_sub_category = EXCLUDED.item_sub_category,
+            color = EXCLUDED.color,
+            brand = EXCLUDED.brand,
+            vendor = EXCLUDED.vendor,
+            value_price = EXCLUDED.value_price,
+            target_demographic = EXCLUDED.target_demographic,
+            utility_type = EXCLUDED.utility_type,
+            durability = EXCLUDED.durability,
+            usage_type = EXCLUDED.usage_type,
+            classification_status = EXCLUDED.classification_status,
+            classified_at = CURRENT_TIMESTAMP
     """
 
     params = (
@@ -136,13 +156,33 @@ def batch_cache_present_classifications(
         Number of cached entries
     """
     query = """
-        INSERT OR REPLACE INTO present_attributes
+        INSERT INTO present_attributes
         (present_hash, present_name, present_vendor, model_name, model_no,
          thread_id, run_id,
          item_main_category, item_sub_category, color, brand, vendor,
          value_price, target_demographic, utility_type, durability, usage_type,
          classification_status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (present_hash)
+        DO UPDATE SET
+            present_name = EXCLUDED.present_name,
+            present_vendor = EXCLUDED.present_vendor,
+            model_name = EXCLUDED.model_name,
+            model_no = EXCLUDED.model_no,
+            thread_id = EXCLUDED.thread_id,
+            run_id = EXCLUDED.run_id,
+            item_main_category = EXCLUDED.item_main_category,
+            item_sub_category = EXCLUDED.item_sub_category,
+            color = EXCLUDED.color,
+            brand = EXCLUDED.brand,
+            vendor = EXCLUDED.vendor,
+            value_price = EXCLUDED.value_price,
+            target_demographic = EXCLUDED.target_demographic,
+            utility_type = EXCLUDED.utility_type,
+            durability = EXCLUDED.durability,
+            usage_type = EXCLUDED.usage_type,
+            classification_status = EXCLUDED.classification_status,
+            classified_at = CURRENT_TIMESTAMP
     """
 
     params_list = []
@@ -208,7 +248,7 @@ def update_classified_present_attributes(
 
     fields_to_set.append("classification_status = ?")
     params_list.append(new_status)
-    fields_to_set.append("classified_at = datetime('now')") # Update timestamp
+    fields_to_set.append("classified_at = CURRENT_TIMESTAMP") # Update timestamp
 
     if thread_id:
         fields_to_set.append("thread_id = ?")
@@ -308,7 +348,7 @@ def cleanup_old_present_cache(days: int = 30) -> int:
     """
     query = """
         DELETE FROM present_attributes
-        WHERE classified_at < datetime('now', '-' || ? || ' days')
+        WHERE classified_at < CURRENT_TIMESTAMP - INTERVAL '%s days'
     """
 
     deleted = db_factory.execute_write(query, (days,))

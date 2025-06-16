@@ -1,48 +1,20 @@
 """
-Database factory to switch between SQLite and PostgreSQL based on environment.
+Database factory - PostgreSQL only implementation.
 """
-import os
 import logging
+
+# Direct import of PostgreSQL module
+from . import db_postgres
 
 logger = logging.getLogger(__name__)
 
-def get_db_module():
-    """
-    Returns the appropriate database module based on environment.
-    
-    Returns:
-        module: Either db (SQLite) or db_postgres (PostgreSQL) module
-    """
-    if os.getenv("DATABASE_URL"):
-        logger.info("Using PostgreSQL database (DATABASE_URL found)")
-        from . import db_postgres as db_module
-    else:
-        logger.info("Using SQLite database (no DATABASE_URL)")
-        from . import db as db_module
-    
-    return db_module
+# Direct delegation to PostgreSQL module
+get_db = db_postgres.get_db
+init_database = db_postgres.init_database
+execute_query = db_postgres.execute_query
+execute_write = db_postgres.execute_write
+execute_many = db_postgres.execute_many
+check_database_exists = db_postgres.check_database_exists
 
-# Convenience functions that delegate to the appropriate module
-def get_db():
-    """Get database connection using appropriate backend."""
-    return get_db_module().get_db()
-
-def init_database():
-    """Initialize database using appropriate backend."""
-    return get_db_module().init_database()
-
-def execute_query(query, params=None):
-    """Execute query using appropriate backend."""
-    return get_db_module().execute_query(query, params)
-
-def execute_write(query, params=None):
-    """Execute write operation using appropriate backend."""
-    return get_db_module().execute_write(query, params)
-
-def execute_many(query, params_list):
-    """Execute many operations using appropriate backend."""
-    return get_db_module().execute_many(query, params_list)
-
-def check_database_exists():
-    """Check if database exists using appropriate backend."""
-    return get_db_module().check_database_exists()
+# Log that we're using PostgreSQL
+logger.info("Database factory configured for PostgreSQL")
