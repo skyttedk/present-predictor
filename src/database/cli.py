@@ -18,8 +18,8 @@ try:
         get_user_api_stats, get_system_api_stats,
         cleanup_old_logs, get_recent_errors
     )
-    from .products import (
-        get_classification_stats, cleanup_old_cache
+    from .presents import (
+        get_present_classification_stats, cleanup_old_present_cache
     )
 except ImportError:
     # This block allows running the script directly for development,
@@ -37,8 +37,8 @@ except ImportError:
         get_user_api_stats, get_system_api_stats,
         cleanup_old_logs, get_recent_errors
     )
-    from src.database.products import (
-        get_classification_stats, cleanup_old_cache
+    from src.database.presents import (
+        get_present_classification_stats, cleanup_old_present_cache
     )
 
 
@@ -267,14 +267,14 @@ def recent_errors_cmd(limit: int): # Renamed to avoid conflict
 def cache_stats_cmd(): # Renamed to avoid conflict
     """Show product classification cache stats"""
     try:
-        stats_data = get_classification_stats()
+        stats_data = get_present_classification_stats()
     except Exception as e:
         click.echo(f"❌ Error fetching cache stats: {e}", err=True)
         sys.exit(1)
 
-    click.echo("\n📦 Product Classification Cache Stats")
+    click.echo("\n📦 Present Classification Cache Stats")
     click.echo(f"Total Cached: {stats_data.get('total_cached', 0)}")
-    click.echo(f"Unique Products: {stats_data.get('unique_products', 0)}")
+    click.echo(f"Unique Presents: {stats_data.get('unique_products', 0)}")
     click.echo(f"Successful: {stats_data.get('successful', 0)}")
     click.echo(f"Failed: {stats_data.get('failed', 0)}")
 
@@ -320,7 +320,7 @@ def cleanup_cache_cmd(days: int): # Renamed to avoid conflict
         click.echo("Cache cleanup cancelled.")
         return
     try:
-        deleted = cleanup_old_cache(days)
+        deleted = cleanup_old_present_cache(days)
         click.echo(f"✅ Deleted {deleted} old cache entries")
     except Exception as e:
         click.echo(f"❌ Error cleaning up cache: {e}", err=True)

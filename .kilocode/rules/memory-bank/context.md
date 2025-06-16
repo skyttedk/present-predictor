@@ -10,9 +10,10 @@
 ## Recent Changes
 - ✅ **API KEY AUTHENTICATION IMPLEMENTED**: Added API key authentication (`X-API-Key` header) to the `/test` endpoint in [`src/api/main.py`](src/api/main.py:1) using [`src/database/users.py`](src/database/users.py:1).
 - ✅ **API DEVELOPMENT STARTED**: Initial FastAPI application created with a `/test` endpoint in [`src/api/main.py`](src/api/main.py:1).
-- ✅ **DATABASE IMPLEMENTATION COMPLETED**: Core database logic ([`src/database/db.py`](src/database/db.py:1)), schema ([`src/database/schema.sql`](src/database/schema.sql:1)), user management ([`src/database/users.py`](src/database/users.py:1)), API logging ([`src/database/api_logs.py`](src/database/api_logs.py:1)), product attribute caching ([`src/database/products.py`](src/database/products.py:1)), and CLI tools ([`src/database/cli.py`](src/database/cli.py:1)) are now implemented.
+- ✅ **DATABASE REFACTORING (PRODUCT TO PRESENT)**: Renamed `products.py` to `presents.py` ([`src/database/presents.py`](src/database/presents.py:1)) and updated `product_attributes` table to `present_attributes` in schema ([`src/database/schema.sql`](src/database/schema.sql:1)) splitting `raw_description` into `present_name`, `model_name`, `mode_no`.
+- ✅ **DATABASE IMPLEMENTATION COMPLETED**: Core database logic ([`src/database/db.py`](src/database/db.py:1)), schema ([`src/database/schema.sql`](src/database/schema.sql:1)), user management ([`src/database/users.py`](src/database/users.py:1)), API logging ([`src/database/api_logs.py`](src/database/api_logs.py:1)), present attribute caching ([`src/database/presents.py`](src/database/presents.py:1)), and CLI tools ([`src/database/cli.py`](src/database/cli.py:1)) are now implemented.
 - ✅ **DATABASE IMPLEMENTATION PLANNED**: Complete database backend design documented in [`docs/database_implementation.md`](docs/database_implementation.md:1)
-  - Three core tables: user (API authentication), user_api_call_log (request tracking), product_attributes (classification cache)
+  - Three core tables: user (API authentication), user_api_call_log (request tracking), present_attributes (classification cache)
   - Direct SQLite implementation without ORM overhead
   - Comprehensive CLI tools for database management
   - API integration patterns for FastAPI
@@ -57,7 +58,7 @@
 - **Three Core Tables**: 
   - `user`: API authentication with hashed keys
   - `user_api_call_log`: Comprehensive request/response logging
-  - `product_attributes`: OpenAI classification caching
+  - `present_attributes`: OpenAI classification caching
 - **CLI Management**: Full-featured command-line tools for user and database management
 
 ### Key Features
@@ -77,7 +78,7 @@
 1. **API Development with Database**: 🚀 **IN PROGRESS** - Initial test endpoint created.
    - ✅ Integrate authentication middleware using [`src/database/users.py`](src/database/users.py:1) (Implemented for `/test` endpoint).
    - Add request/response logging using [`src/database/api_logs.py`](src/database/api_logs.py:1).
-   - Implement product classification caching using [`src/database/products.py`](src/database/products.py:1).
+   - Implement present classification caching using [`src/database/presents.py`](src/database/presents.py:1).
 2. **Database Implementation**: ✅ **COMPLETED**
    - Core database module and schema created.
    - User management and API key system implemented.
@@ -111,12 +112,12 @@
 - **No ORM**: Direct SQL for simplicity and performance
 - **Hashed API Keys**: Security without complexity
 - **JSON Payloads**: Flexible request/response logging
-- **Product Hash**: MD5 hash of descriptions for cache matching
+- **Present Hash**: MD5 hash of combined present_name, model_name, model_no for cache matching (primary key for `present_attributes`)
 
 ### API Integration Strategy
 - **Middleware Pattern**: Clean separation of concerns
 - **Async Logging**: Non-blocking request tracking
-- **Cache-First**: Check product cache before OpenAI calls
+- **Cache-First**: Check present cache before OpenAI calls
 - **Statistics API**: Built-in analytics endpoints
 
 ### Current Achieved Model Configuration (CatBoost - OPTIMIZED)

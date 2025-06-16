@@ -32,13 +32,16 @@ Logs all API requests made by users.
 - `response_time_ms` REAL
 - `error_message` TEXT
 
-### 3. `product_attributes`
-Caches product classification results from OpenAI.
+### 3. `present_attributes`
+Caches present classification results from OpenAI.
 
 **Columns**:
 - `id` INTEGER PRIMARY KEY AUTOINCREMENT
-- `product_id` TEXT NOT NULL UNIQUE (Original product identifier from request)
-- `product_hash` TEXT NOT NULL UNIQUE (MD5 hash of the raw product description, used for cache lookups)
+- `present_hash` TEXT NOT NULL UNIQUE (MD5 hash of combined present_name, model_name, model_no; used for cache lookups)
+- `present_name` TEXT
+- `present_vendor` TEXT
+- `model_name` TEXT
+- `model_no` TEXT
 - `thread_id` TEXT (OpenAI Assistant thread ID)
 - `run_id` TEXT (OpenAI Assistant run ID)
 - `item_main_category` TEXT
@@ -53,17 +56,22 @@ Caches product classification results from OpenAI.
 - `usage_type` TEXT
 - `classified_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 - `classification_status` TEXT DEFAULT 'success' (e.g., 'success', 'error', 'pending')
-- `raw_description` TEXT (The original product description text that was classified)
+- `vendor` TEXT (This is the classified vendor attribute)
+- `value_price` REAL
+- `target_demographic` TEXT
+- `utility_type` TEXT
+- `durability` TEXT
+- `usage_type` TEXT
+- `classified_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+- `classification_status` TEXT DEFAULT 'success' (e.g., 'success', 'error', 'pending')
 
 ## Indexes
 - `idx_user_api_key` ON `user(api_key)`
 - `idx_api_log_user_date` ON `user_api_call_log(user_id, date_time)`
 - `idx_api_log_route` ON `user_api_call_log(api_route)`
-- `idx_product_hash` ON `product_attributes(product_hash)`
-- `idx_product_id` ON `product_attributes(product_id)`
+- `idx_present_hash` ON `present_attributes(present_hash)`
 
 ## Notes
-- The `product_attributes` table uses `product_hash` (an MD5 hash of the raw product description) as the primary key for caching, ensuring that identical descriptions are not re-classified unnecessarily. `product_id` is stored for reference but might not be unique across different client requests if descriptions differ slightly for the same product ID.
+- The `present_attributes` table uses `present_hash` (an MD5 hash of the combined present_name, model_name, and model_no) as the unique key for caching.
 - OpenAI `thread_id` and `run_id` are stored for traceability and potential debugging of the classification process.
-- The schema is defined in [`src/database/schema.sql`](src/database/schema.sql:1) and managed by modules in [`src/database/`](src/database/:1).
-  
+- The schema is defined in [`src/database/schema.sql`](src/database/schema.sql:1) and managed by modules in [`src/database/`](src/database/:1) (specifically [`src/database/presents.py`](src/database/presents.py:1)).

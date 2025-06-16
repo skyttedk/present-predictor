@@ -22,34 +22,36 @@ CREATE TABLE IF NOT EXISTS user_api_call_log (
     FOREIGN KEY (user_id) REFERENCES user(id)
 );
 
--- Product classification cache
-CREATE TABLE IF NOT EXISTS product_attributes (
+-- Present classification cache
+DROP TABLE IF EXISTS present_attributes;
+CREATE TABLE IF NOT EXISTS present_attributes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    product_id TEXT NOT NULL UNIQUE,
-    product_hash TEXT NOT NULL UNIQUE,
+    present_hash TEXT NOT NULL UNIQUE,
+    present_name TEXT,
+    present_vendor TEXT,
+    model_name TEXT,
+    model_no TEXT,
     thread_id TEXT,
     run_id TEXT,
     item_main_category TEXT,
     item_sub_category TEXT,
     color TEXT,
     brand TEXT,
-    vendor TEXT,
+    vendor TEXT, -- This is the classified vendor attribute
     value_price REAL,
     target_demographic TEXT,
     utility_type TEXT,
     durability TEXT,
     usage_type TEXT,
     classified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    classification_status TEXT DEFAULT 'success',
-    raw_description TEXT
+    classification_status TEXT DEFAULT 'success'
 );
 
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_user_api_key ON user(api_key);
 CREATE INDEX IF NOT EXISTS idx_api_log_user_date ON user_api_call_log(user_id, date_time);
 CREATE INDEX IF NOT EXISTS idx_api_log_route ON user_api_call_log(api_route);
-CREATE INDEX IF NOT EXISTS idx_product_hash ON product_attributes(product_hash);
-CREATE INDEX IF NOT EXISTS idx_product_id ON product_attributes(product_id);
+CREATE INDEX IF NOT EXISTS idx_present_hash ON present_attributes(present_hash);
 
 -- Trigger to update the updated_at timestamp
 CREATE TRIGGER IF NOT EXISTS update_user_timestamp

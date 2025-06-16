@@ -60,20 +60,24 @@ This document provides detailed information about the actual data structures, fi
 
 ## API Classification Schema
 
-### File: `src/data/product.attributes.schema.json`
+### File: `src/data/present.attributes.schema.json`
 
 **Schema Structure**:
 ```json
 {
+  "present_name": "string",
+  "present_vendor": "string",
+  "model_name": "string",
+  "model_no": "string",
   "itemMainCategory": "string",
   "itemSubCategory": "string",
-  "color": "string", 
+  "color": "string",
   "brand": "string",
   "vendor": "string",
   "valuePrice": "number",
   "targetDemographic": "male|female|unisex",
   "utilityType": "practical|work|aesthetic|status|sentimental|exclusive",
-  "durability": "consumable|durable", 
+  "durability": "consumable|durable",
   "usageType": "shareable|individual"
 }
 ```
@@ -116,8 +120,10 @@ usageType          → product_type
   "branch_no": "621000",
   "gifts": [
     {
-      "product_id": "ABC123",
-      "description": "Red ceramic mug with handle"
+      "present_name": "Mug",
+      "present_vendor": "BestMugsEver",
+      "model_name": "Ceramic Red",
+      "model_no": "HandleVariant"
     }
   ],
   "employees": [
@@ -129,10 +135,10 @@ usageType          → product_type
 
 ### Step 2: Classification Processing
 **Required Operations**:
-1. **Gift Description → Schema Attributes (OpenAI Assistant)**
+1. **Gift Details → Schema Attributes (OpenAI Assistant)**
    - **Use OpenAI Assistant API** (Assistant ID: `asst_BuFvA6iXF4xSyQ4px7Q5zjiN`)
-   - Send product description to trained OpenAI agent via Assistant API
-   - Receive structured JSON response matching `product.attributes.schema.json`
+   - Send combined present_name, present_vendor, model_name, model_no (or individual fields) to trained OpenAI agent via Assistant API
+   - Receive structured JSON response matching `present.attributes.schema.json`
    - API flow: CreateThread → AddMessage → Run → GetRunStatus → GetThreadMessage
    - Apply JSON schema validation to response
    - Handle missing/default values

@@ -86,9 +86,13 @@ product_color, product_durability, product_target_gender,
 product_utility_type, product_type
 ```
 
-**Classification Schema** (`product.attributes.schema.json`):
+**Classification Schema** (`present.attributes.schema.json`):
 ```json
 {
+  "present_name": "string",
+  "present_vendor": "string",
+  "model_name": "string",
+  "model_no": "string",
   "itemMainCategory": "string",
   "itemSubCategory": "string",
   "color": "string",
@@ -106,14 +110,14 @@ product_utility_type, product_type
 
 ```
 Step 1: Raw Request Processing
-├── Input: {branch_no, gifts[{product_id, description}], employees[{name}]}
+├── Input: {branch_no, gifts[{present_name, present_vendor, model_name, model_no}], employees[{name}]}
 ├── Validation: Request schema validation
 └── Output: Validated raw data
 
 Step 2: Data Reclassification
 ├── Input: Raw validated data
 ├── Processing:
-│   ├── Gift description → JSON schema attributes (LLM/rule-based)
+│   ├── Gift details (name, vendor, model, model_no) → JSON schema attributes (LLM/rule-based)
 │   ├── Employee name → gender classification
 │   └── Field mapping: JSON schema → CSV column names
 └── Output: Classified feature data matching historical structure

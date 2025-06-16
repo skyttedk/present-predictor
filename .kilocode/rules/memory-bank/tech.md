@@ -19,8 +19,8 @@
 **Real Data Structure**:
 - **Historical Training Data**: `present.selection.historic.csv`
   - Columns: employee_shop, employee_branch, employee_gender, product_main_category, product_sub_category, product_brand, product_color, product_durability, product_target_gender, product_utility_type, product_type
-- **Classification Schema**: `product.attributes.schema.json`
-  - Fields: itemMainCategory, itemSubCategory, color, brand, vendor, valuePrice, targetDemographic, utilityType, durability, usageType
+- **Classification Schema**: `present.attributes.schema.json`
+  - Fields: present_name, present_vendor, model_name, model_no, itemMainCategory, itemSubCategory, color, brand, vendor, valuePrice, targetDemographic, utilityType, durability, usageType
   - Enums: targetDemographic (male/female/unisex), utilityType (practical/work/aesthetic/status/sentimental/exclusive), durability (consumable/durable), usageType (shareable/individual)
 
 ### Machine Learning
