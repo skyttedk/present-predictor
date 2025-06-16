@@ -3,10 +3,23 @@ Application settings for the Predictive Gift Selection System.
 Handles environment variables and application configuration.
 """
 
+from dotenv import load_dotenv
 import os
 from typing import Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings
+from pathlib import Path
+
+# Explicitly load .env file contents into environment variables
+# This should be called before any Settings class tries to read them.
+# Find the .env file relative to this settings.py file
+env_path = Path(__file__).parent.parent.parent / '.env'
+print(f"DEBUG: Looking for .env file at: {env_path}")
+print(f"DEBUG: .env file exists: {env_path.exists()}")
+load_dotenv(dotenv_path=env_path)
+
+# Debug: Check if the key was loaded
+print(f"DEBUG: OPENAI_API_KEY from environment after load_dotenv: {os.getenv('OPENAI_API_KEY')}")
 
 
 class APISettings(BaseSettings):
@@ -84,8 +97,10 @@ class OpenAISettings(BaseSettings):
     assistant_id: str = Field(default="asst_BuFvA6iXF4xSyQ4px7Q5zjiN", env="OPENAI_ASSISTANT_ID")
 
     class Config:
-        # env_prefix = "OPENAI_" # Not using prefix as .env keys are direct
-        pass
+        # Read from the same .env file as parent
+        env_file = Path(__file__).parent.parent.parent / '.env'
+        env_file_encoding = "utf-8"
+        extra = 'ignore'  # Allow extra fields from parent
 
 class CatBoostModelSettings(BaseSettings):
     """CatBoost specific model configuration settings."""
@@ -145,18 +160,33 @@ class Settings(BaseSettings):
     environment: str = Field(default="development", env="ENVIRONMENT")
     debug: bool = Field(default=True, env="DEBUG")
     
-    # Component settings
-    api: APISettings = APISettings()
-    database: DatabaseSettings = DatabaseSettings()
-    data: DataSettings = DataSettings()
-    logging: LoggingSettings = LoggingSettings()
-    security: SecuritySettings = SecuritySettings()
-    openai: OpenAISettings = OpenAISettings()
-    model_general: ModelSettings = ModelSettings()
-    model_catboost: CatBoostModelSettings = CatBoostModelSettings()
+    # Component settings - let pydantic handle instantiation
+    api: APISettings
+    database: DatabaseSettings
+    data: DataSettings
+    logging: LoggingSettings
+    security: SecuritySettings
+    openai: OpenAISettings
+    model_general: ModelSettings
+    model_catboost: CatBoostModelSettings
+    
+    def __init__(self, **kwargs):
+        # Create sub-settings with proper environment loading
+        super().__init__(
+            api=APISettings(),
+            database=DatabaseSettings(),
+            data=DataSettings(),
+            logging=LoggingSettings(),
+            security=SecuritySettings(),
+            openai=OpenAISettings(),
+            model_general=ModelSettings(),
+            model_catboost=CatBoostModelSettings(),
+            **kwargs
+        )
     
     class Config:
-        env_file = ".env"
+        # Use the same path as our load_dotenv
+        env_file = Path(__file__).parent.parent.parent / '.env'
         env_file_encoding = "utf-8"
         case_sensitive = False
         extra = 'ignore'  # Allow and ignore extra fields from .env at the top level
@@ -178,13 +208,18 @@ class Settings(BaseSettings):
         return self.environment.lower() in ("testing", "test")
 
 
-# Global settings instance
-settings = Settings()
-
+# Create settings lazily to ensure env is loaded
+_settings = None
 
 def get_settings() -> Settings:
     """Get application settings instance."""
-    return settings
+    global _settings
+    if _settings is None:
+        _settings = Settings()
+    return _settings
+
+# Export settings for convenience, but it will be created lazily
+settings = get_settings()
 
 
 def reload_settings() -> Settings:

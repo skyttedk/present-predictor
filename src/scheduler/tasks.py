@@ -28,7 +28,18 @@ async def fetch_pending_present_attributes():
 
         logger.info(f"Scheduler task: Found {len(pending_presents)} presents pending classification.")
         
-        openai_client = create_openai_client() # Create client once
+        try:
+            openai_client = create_openai_client() # Create client once
+        except ValueError as e:
+            if "OPENAI_API_KEY" in str(e):
+                logger.warning(f"Scheduler task: OPENAI_API_KEY not set. Skipping classification for this run. Error: {e}")
+                return # Skip this run if API key is not set
+            else:
+                logger.error(f"Scheduler task: Error creating OpenAI client: {e}", exc_info=True)
+                return # Skip this run due to other client creation error
+        except Exception as e: # Catch any other unexpected error during client creation
+            logger.error(f"Scheduler task: Unexpected error creating OpenAI client: {e}", exc_info=True)
+            return # Skip this run
 
         for present in pending_presents:
             present_hash = present["present_hash"]

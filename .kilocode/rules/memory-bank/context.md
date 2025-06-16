@@ -8,10 +8,18 @@
 **API DEVELOPMENT STARTED**: The initial FastAPI application ([`src/api/main.py`](src/api/main.py:1)) has been created with a test endpoint. The focus is now on building out the API endpoints and integrating them with the existing database backend.
 
 ## Recent Changes
+- ✅ **OPENAI INTEGRATION FULLY OPERATIONAL**: Fixed API key loading issues and HTTP client errors. Classification system now working end-to-end.
+- ✅ **CLI RESET COMMAND ADDED**: Added `reset-failed-presents` command to [`src/database/cli.py`](src/database/cli.py:1) for resetting failed classification attempts.
+- ✅ **API KEY LOADING FIXED**: Resolved pydantic-settings issues by adding explicit `load_dotenv()` with path and fallback mechanism in [`src/config/settings.py`](src/config/settings.py:1) and [`src/data/openai_client.py`](src/data/openai_client.py:1).
+- ✅ **HTTP CLIENT ERROR RESOLVED**: Fixed "Cannot reopen client" error in [`src/data/openai_client.py`](src/data/openai_client.py:1) by removing incorrect context manager usage.
+- ✅ **SCHEDULER TASK IMPROVED**: Made `fetch_pending_present_attributes` more resilient to missing API keys with proper error handling.
+- ✅ **ADDPRESENT ENDPOINT**: Created `/addPresent` endpoint in [`src/api/main.py`](src/api/main.py:1) that adds presents with 'pending_classification' status.
+- ✅ **SCHEDULER IMPLEMENTED**: APScheduler runs `fetch_pending_present_attributes` every 2 minutes to classify pending presents.
 - ✅ **API KEY AUTHENTICATION IMPLEMENTED**: Added API key authentication (`X-API-Key` header) to the `/test` endpoint in [`src/api/main.py`](src/api/main.py:1) using [`src/database/users.py`](src/database/users.py:1).
 - ✅ **API DEVELOPMENT STARTED**: Initial FastAPI application created with a `/test` endpoint in [`src/api/main.py`](src/api/main.py:1).
 - ✅ **DATABASE REFACTORING (PRODUCT TO PRESENT)**: Renamed `products.py` to `presents.py` ([`src/database/presents.py`](src/database/presents.py:1)) and updated `product_attributes` table to `present_attributes` in schema ([`src/database/schema.sql`](src/database/schema.sql:1)) splitting `raw_description` into `present_name`, `model_name`, `model_no`.
 - ✅ **DATABASE IMPLEMENTATION COMPLETED**: Core database logic ([`src/database/db.py`](src/database/db.py:1)), schema ([`src/database/schema.sql`](src/database/schema.sql:1)), user management ([`src/database/users.py`](src/database/users.py:1)), API logging ([`src/database/api_logs.py`](src/database/api_logs.py:1)), present attribute caching ([`src/database/presents.py`](src/database/presents.py:1)), and CLI tools ([`src/database/cli.py`](src/database/cli.py:1)) are now implemented.
+- ✅ **CLI CSV IMPORT IMPLEMENTED**: Added `import-presents-csv` command to [`src/database/cli.py`](src/database/cli.py:1) for importing pre-classified present attributes from a CSV file.
 - ✅ **DATABASE IMPLEMENTATION PLANNED**: Complete database backend design documented in [`docs/database_implementation.md`](docs/database_implementation.md:1)
   - Three core tables: user (API authentication), user_api_call_log (request tracking), present_attributes (classification cache)
   - Direct SQLite implementation without ORM overhead

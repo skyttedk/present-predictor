@@ -41,8 +41,19 @@ class OpenAIAssistantClient:
     """
     
     def __init__(self): # Removed config parameter, will use global settings
+        # Force reload if API key is not set
         if not settings.openai.api_key:
-            raise ValueError("OPENAI_API_KEY is not set in the environment or .env file.")
+            # Try direct env access as fallback
+            api_key_from_env = os.getenv('OPENAI_API_KEY')
+            logger.info(f"Initializing OpenAIAssistantClient. Value of settings.openai.api_key: '{settings.openai.api_key}', env OPENAI_API_KEY: '{api_key_from_env}'")
+            if api_key_from_env:
+                # Use environment variable directly if settings didn't load it
+                settings.openai.api_key = api_key_from_env
+                logger.info(f"Manually set settings.openai.api_key from environment")
+            else:
+                raise ValueError("OPENAI_API_KEY is not set in the environment or .env file.")
+        else:
+            logger.info(f"Initializing OpenAIAssistantClient. Value of settings.openai.api_key: '{settings.openai.api_key}'")
         
         # Use settings from the global 'settings' object
         self.config = OpenAIConfig(
@@ -52,9 +63,9 @@ class OpenAIAssistantClient:
             # or could also be added to OpenAISettings and .env if needed
         )
         self.client = httpx.AsyncClient(
-            timeout=config.timeout,
+            timeout=self.config.timeout, # Corrected: self.config
             headers={
-                "Authorization": f"Bearer {config.api_key}",
+                "Authorization": f"Bearer {self.config.api_key}", # Corrected: self.config
                 "OpenAI-Beta": "assistants=v2",
                 "Content-Type": "application/json"
             }
@@ -107,11 +118,10 @@ class OpenAIAssistantClient:
         """Create a new conversation thread."""
         url = f"{self.config.base_url}/threads"
         
-        async with self.client as client:
-            response = await client.post(url, json={})
-            response.raise_for_status()
-            data = response.json()
-            return data["id"]
+        response = await self.client.post(url, json={})
+        response.raise_for_status()
+        data = response.json()
+        return data["id"]
     
     async def _add_message(self, thread_id: str, message: str) -> str:
         """Add a message to the thread."""
@@ -121,11 +131,10 @@ class OpenAIAssistantClient:
             "content": message
         }
         
-        async with self.client as client:
-            response = await client.post(url, json=payload)
-            response.raise_for_status()
-            data = response.json()
-            return data["id"]
+        response = await self.client.post(url, json=payload)
+        response.raise_for_status()
+        data = response.json()
+        return data["id"]
     
     async def _create_run(self, thread_id: str) -> str:
         """Create a run for the thread."""
@@ -134,11 +143,10 @@ class OpenAIAssistantClient:
             "assistant_id": self.config.assistant_id
         }
         
-        async with self.client as client:
-            response = await client.post(url, json=payload)
-            response.raise_for_status()
-            data = response.json()
-            return data["id"]
+        response = await self.client.post(url, json=payload)
+        response.raise_for_status()
+        data = response.json()
+        return data["id"]
     
     async def _wait_for_completion(self, thread_id: str, run_id: str, max_wait: int = 60) -> None:
         """Wait for the run to complete."""
@@ -146,25 +154,24 @@ class OpenAIAssistantClient:
         start_time = time.time()
         
         while time.time() - start_time < max_wait:
-            async with self.client as client:
-                response = await client.get(url)
-                response.raise_for_status()
-                data = response.json()
-                
-                status = data.get("status")
-                logger.debug(f"Run status: {status}")
-                
-                if status == "completed":
-                    return
-                elif status in ["failed", "cancelled", "expired"]:
-                    error_msg = data.get("last_error", {}).get("message", "Unknown error")
-                    raise OpenAIClassificationError(f"Run {status}: {error_msg}")
-                elif status in ["queued", "in_progress", "requires_action"]:
-                    await asyncio.sleep(1)
-                    continue
-                else:
-                    logger.warning(f"Unknown run status: {status}")
-                    await asyncio.sleep(1)
+            response = await self.client.get(url)
+            response.raise_for_status()
+            data = response.json()
+            
+            status = data.get("status")
+            logger.debug(f"Run status: {status}")
+            
+            if status == "completed":
+                return
+            elif status in ["failed", "cancelled", "expired"]:
+                error_msg = data.get("last_error", {}).get("message", "Unknown error")
+                raise OpenAIClassificationError(f"Run {status}: {error_msg}")
+            elif status in ["queued", "in_progress", "requires_action"]:
+                await asyncio.sleep(1)
+                continue
+            else:
+                logger.warning(f"Unknown run status: {status}")
+                await asyncio.sleep(1)
         
         raise OpenAIClassificationError(f"Run timed out after {max_wait} seconds")
     
@@ -172,27 +179,26 @@ class OpenAIAssistantClient:
         """Get the latest message from the thread."""
         url = f"{self.config.base_url}/threads/{thread_id}/messages"
         
-        async with self.client as client:
-            response = await client.get(url)
-            response.raise_for_status()
-            data = response.json()
-            
-            if not data.get("data"):
-                raise OpenAIClassificationError("No messages found in thread")
-            
-            # Get the first (latest) message
-            latest_message = data["data"][0]
-            content = latest_message.get("content", [])
-            
-            if not content:
-                raise OpenAIClassificationError("No content in latest message")
-            
-            # Extract text content
-            text_content = content[0].get("text", {}).get("value", "")
-            if not text_content:
-                raise OpenAIClassificationError("No text content in message")
-            
-            return {"content": text_content}
+        response = await self.client.get(url)
+        response.raise_for_status()
+        data = response.json()
+        
+        if not data.get("data"):
+            raise OpenAIClassificationError("No messages found in thread")
+        
+        # Get the first (latest) message
+        latest_message = data["data"][0]
+        content = latest_message.get("content", [])
+        
+        if not content:
+            raise OpenAIClassificationError("No content in latest message")
+        
+        # Extract text content
+        text_content = content[0].get("text", {}).get("value", "")
+        if not text_content:
+            raise OpenAIClassificationError("No text content in message")
+        
+        return {"content": text_content}
     
     def _parse_classification_response(self, response_data: Dict[str, Any]) -> GiftAttributes:
         """

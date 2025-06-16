@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS user_api_call_log (
 );
 
 -- Present classification cache
-DROP TABLE IF EXISTS present_attributes;
+-- DROP TABLE IF EXISTS present_attributes;
 CREATE TABLE IF NOT EXISTS present_attributes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     present_hash TEXT NOT NULL UNIQUE,

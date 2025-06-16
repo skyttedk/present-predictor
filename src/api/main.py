@@ -29,9 +29,9 @@ async def lifespan(app_instance: FastAPI): # Renamed app to app_instance to avoi
     logger.info("Application startup: Database initialized.")
     
     logger.info("Application startup: Starting scheduler...")
-    scheduler.add_job(fetch_pending_present_attributes, "interval", minutes=10, id="fetch_attributes_job")
+    scheduler.add_job(fetch_pending_present_attributes, "interval", minutes=2, id="fetch_attributes_job")
     scheduler.start()
-    logger.info("Application startup: Scheduler started. Job 'fetch_attributes_job' scheduled every 10 minutes.")
+    logger.info("Application startup: Scheduler started. Job 'fetch_attributes_job' scheduled every 2 minutes.")
     
     yield
     

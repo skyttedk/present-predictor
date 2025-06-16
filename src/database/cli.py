@@ -4,12 +4,15 @@ Command-line interface for database management.
 import click
 import sys
 from tabulate import tabulate
+from pathlib import Path
+import pandas as pd
+from datetime import datetime, timezone
 
 # Ensure src directory is in Python path for relative imports
 # This might be needed if running cli.py directly for testing,
 # but generally, it's better to run as a module: python -m src.database.cli
 try:
-    from .db import init_database, check_database_exists
+    from .db import init_database, check_database_exists, get_db
     from .users import (
         create_user, list_users, deactivate_user,
         reactivate_user, regenerate_api_key
@@ -28,7 +31,7 @@ except ImportError:
     if os.path.basename(os.getcwd()) == "database" and \
        os.path.basename(os.path.dirname(os.getcwd())) == "src":
         sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..", "..")))
-    from src.database.db import init_database, check_database_exists
+    from src.database.db import init_database, check_database_exists, get_db
     from src.database.users import (
         create_user, list_users, deactivate_user,
         reactivate_user, regenerate_api_key
@@ -325,6 +328,171 @@ def cleanup_cache_cmd(days: int): # Renamed to avoid conflict
     except Exception as e:
         click.echo(f"❌ Error cleaning up cache: {e}", err=True)
         sys.exit(1)
+
+@cli.command('reset-failed-presents')
+@click.option('--status-filter', default='error%', help='SQL LIKE pattern for status to reset (default: error%)')
+@click.option('--dry-run', is_flag=True, help='Show what would be reset without making changes')
+def reset_failed_presents(status_filter: str, dry_run: bool):
+    """Reset failed present classifications back to pending status."""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            
+            # First, count how many would be affected
+            cursor.execute("""
+                SELECT COUNT(*) as count, classification_status,
+                       COUNT(DISTINCT classification_status) as status_count
+                FROM present_attributes
+                WHERE classification_status LIKE ?
+                GROUP BY classification_status
+            """, (status_filter,))
+            
+            results = cursor.fetchall()
+            
+            if not results:
+                click.echo("No failed presents found to reset.")
+                return
+                
+            # Show what will be reset
+            click.echo("\nPresents to reset:")
+            total_count = 0
+            for row in results:
+                count = row['count']
+                status = row['classification_status']
+                click.echo(f"  - {count} presents with status '{status}'")
+                total_count += count
+            
+            if dry_run:
+                click.echo(f"\n🔍 DRY RUN: Would reset {total_count} presents to 'pending_classification'")
+                return
+                
+            if not click.confirm(f"\nReset {total_count} presents to 'pending_classification'?"):
+                click.echo("Reset cancelled.")
+                return
+                
+            # Perform the reset
+            cursor.execute("""
+                UPDATE present_attributes
+                SET classification_status = 'pending_classification',
+                    thread_id = NULL,
+                    run_id = NULL
+                WHERE classification_status LIKE ?
+            """, (status_filter,))
+            
+            affected = cursor.rowcount
+            
+            click.echo(f"✅ Successfully reset {affected} presents to 'pending_classification'")
+        
+    except Exception as e:
+        click.echo(f"❌ Error resetting failed presents: {e}", err=True)
+        sys.exit(1)
+
+@cli.command('import-presents-csv')
+@click.option('--csv-path', required=True, type=click.Path(exists=True, dir_okay=False, readable=True, path_type=Path), help='Path to the CSV file containing present attributes.')
+def import_presents_csv(csv_path: Path):
+    """Import present attributes from a CSV file into the present_attributes table."""
+    click.echo(f"Attempting to import presents from: {csv_path}")
+
+    try:
+        df = pd.read_csv(csv_path, keep_default_na=False, na_values=['']) # Treat empty strings as NA, but keep actual "NA" strings if any
+    except FileNotFoundError:
+        click.echo(f"❌ Error: CSV file not found at {csv_path}", err=True)
+        sys.exit(1)
+    except pd.errors.EmptyDataError:
+        click.echo(f"❌ Error: CSV file at {csv_path} is empty.", err=True)
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"❌ Error reading CSV file: {e}", err=True)
+        sys.exit(1)
+
+    required_columns = {
+        'present_hash', 'present_name', 'present_vendor', 'model_name', 'model_no',
+        'item_main_category', 'item_sub_category', 'color', 'brand', 'vendor',
+        'target_demographic', 'utility_type', 'durability', 'usage_type'
+    }
+    missing_columns = required_columns - set(df.columns)
+    if missing_columns:
+        click.echo(f"❌ Error: CSV file is missing required columns: {', '.join(missing_columns)}", err=True)
+        sys.exit(1)
+
+    imported_count = 0
+    skipped_count = 0
+    error_count = 0
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        for index, row in df.iterrows():
+            present_hash = row['present_hash']
+            try:
+                cursor.execute("SELECT 1 FROM present_attributes WHERE present_hash = ?", (present_hash,))
+                exists = cursor.fetchone()
+
+                if exists:
+                    click.echo(f"⏭️ Skipping existing present_hash: {present_hash}")
+                    skipped_count += 1
+                    continue
+
+                # Prepare data for insertion
+                # Convert pandas NA (often NaN for empty strings if not handled by keep_default_na/na_values) to None
+                data_to_insert = {
+                    "present_hash": present_hash,
+                    "present_name": str(row['present_name']) if pd.notna(row['present_name']) else None,
+                    "present_vendor": str(row['present_vendor']) if pd.notna(row['present_vendor']) else None,
+                    "model_name": str(row['model_name']) if pd.notna(row['model_name']) else None,
+                    "model_no": str(row['model_no']) if pd.notna(row['model_no']) else None,
+                    "item_main_category": str(row['item_main_category']) if pd.notna(row['item_main_category']) else None,
+                    "item_sub_category": str(row['item_sub_category']) if pd.notna(row['item_sub_category']) else None,
+                    "color": str(row['color']) if pd.notna(row['color']) else None,
+                    "brand": str(row['brand']) if pd.notna(row['brand']) else None,
+                    "vendor": str(row['vendor']) if pd.notna(row['vendor']) else None, # Classified vendor
+                    "value_price": None, # As per user request
+                    "target_demographic": str(row['target_demographic']) if pd.notna(row['target_demographic']) else None,
+                    "utility_type": str(row['utility_type']) if pd.notna(row['utility_type']) else None,
+                    "durability": str(row['durability']) if pd.notna(row['durability']) else None,
+                    "usage_type": str(row['usage_type']) if pd.notna(row['usage_type']) else None,
+                    "classified_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                    "classification_status": "success", # Pre-classified
+                    "thread_id": None,
+                    "run_id": None,
+                }
+                
+                # Ensure all required string fields that are not nullable in DB are not None
+                # For simplicity, assuming all text fields in DB can be NULL or have defaults if not provided
+                # Or that pandas `str(row['...']) if pd.notna(...) else None` handles it.
+
+                columns = ', '.join(data_to_insert.keys())
+                placeholders = ', '.join(['?'] * len(data_to_insert))
+                sql = f"INSERT INTO present_attributes ({columns}) VALUES ({placeholders})"
+                
+                cursor.execute(sql, tuple(data_to_insert.values()))
+                imported_count += 1
+                if imported_count % 100 == 0: # Log progress
+                    click.echo(f"Processed {index + 1} rows, Imported: {imported_count}, Skipped: {skipped_count}...")
+
+            except Exception as e_row:
+                click.echo(f"❌ Error processing row {index + 2} (present_hash: {present_hash}): {e_row}", err=True)
+                error_count += 1
+                # Optionally, decide if you want to rollback or continue on row error
+        
+        conn.commit()
+        click.echo("\n--- Import Summary ---")
+        click.echo(f"✅ Successfully imported: {imported_count} presents")
+        click.echo(f"⏭️ Skipped (already exist): {skipped_count} presents")
+        if error_count > 0:
+            click.echo(f"❌ Errors encountered: {error_count} presents", err=True)
+        click.echo("----------------------")
+
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        click.echo(f"❌ An unexpected error occurred during import: {e}", err=True)
+        sys.exit(1)
+    finally:
+        if conn:
+            conn.close()
 
 
 if __name__ == '__main__':

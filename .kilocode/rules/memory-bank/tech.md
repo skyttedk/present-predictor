@@ -52,7 +52,16 @@ pandas>=2.0.0
 catboost>=1.2.0  # Updated from xgboost
 scikit-learn>=1.3.0
 pydantic>=2.0.0
+pydantic-settings>=2.0.0
 numpy>=1.24.0
+apscheduler>=3.10.0
+python-multipart>=0.0.6
+httpx>=0.24.0
+gender-guesser>=0.4.0
+optuna>=3.0.0
+click>=8.0.0
+tabulate>=0.9.0
+python-dotenv>=0.21.0  # For explicit .env file loading
 ```
 
 ### Development Dependencies

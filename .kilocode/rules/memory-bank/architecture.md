@@ -29,10 +29,11 @@ The Predictive Gift Selection System follows a modular architecture with clear s
   - Error handling
 
 **Key Files**:
-- `main.py` - FastAPI application entry point (includes `/test`, `/addPresent`)
+- `main.py` - FastAPI application entry point (includes `/test`, `/addPresent`, scheduler initialization)
 - `endpoints/` - API route definitions (e.g., `/predict`)
 - `schemas/` - Pydantic models for request/response validation (e.g., `AddPresentRequest`, `PredictionRequest`)
 - `middleware/` - Request/response processing
+- `scheduler/tasks.py` - Background task for automatic present classification
 
 ### 2. Data Pipeline Layer
 **Location**: `/src/data/`
@@ -46,6 +47,8 @@ The Predictive Gift Selection System follows a modular architecture with clear s
 **Key Files**:
 - `preprocessor.py` - Data cleaning and transformation
 - `classifier.py` - Gift categorization logic
+- `openai_client.py` - OpenAI Assistant API integration for present classification
+- `gender_classifier.py` - Enhanced gender classification with Danish name support
 - `aggregator.py` - Data grouping and aggregation
 - `schemas/` - Data structure definitions
 
@@ -73,6 +76,15 @@ The Predictive Gift Selection System follows a modular architecture with clear s
   - Model hyperparameters
   - API settings
   - Database connections
+  - Scheduler configuration
+
+### 5. Scheduler Layer
+**Location**: Integrated into FastAPI app
+- **Framework**: APScheduler
+- **Responsibilities**:
+  - Periodic execution of classification tasks
+  - Background processing of pending presents
+  - Error handling and retry logic
 
 ## Data Flow Architecture
 
@@ -123,10 +135,19 @@ Step 1: Raw Request Processing (for /predict endpoint)
 Step 2: Data Reclassification
 ├── Input: Validated raw data (gifts will be looked up in `present_attributes` or classified if status is 'pending_classification' or missing)
 ├── Processing:
-│   ├── Gift details (name, vendor, model, model_no) → JSON schema attributes (LLM/rule-based if not cached or pending)
-│   ├── Employee name → gender classification
+│   ├── Gift details (name, vendor, model, model_no) → JSON schema attributes (OpenAI Assistant API)
+│   ├── Employee name → gender classification (Enhanced gender_guesser with Danish names)
 │   └── Field mapping: JSON schema → CSV column names
 └── Output: Classified feature data matching historical structure
+
+Step 2.5: Background Classification (Scheduler)
+├── Every 2 minutes: APScheduler triggers `fetch_pending_present_attributes`
+├── Queries database for presents with 'pending_classification' status
+├── For each pending present:
+│   ├── Send to OpenAI Assistant API
+│   ├── Parse classification response
+│   └── Update database with classified attributes
+└── Error handling: Mark as 'error_openai_api' if classification fails
 
 Step 3: Two-Stage Prediction
 ├── Input: Classified feature data (CSV format)
