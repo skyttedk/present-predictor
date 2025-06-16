@@ -5,7 +5,7 @@ import hashlib
 
 from src.api.schemas.requests import AddPresentRequest
 from src.database.users import authenticate_user
-from src.database.db import execute_query, execute_write, init_database
+from src.database import db_factory
 import logging
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -25,7 +25,7 @@ scheduler = AsyncIOScheduler()
 async def lifespan(app_instance: FastAPI): # Renamed app to app_instance to avoid conflict
     # Startup
     logger.info("Application startup: Initializing database...")
-    init_database()
+    db_factory.init_database()
     logger.info("Application startup: Database initialized.")
     
     logger.info("Application startup: Starting scheduler...")
@@ -104,7 +104,7 @@ async def add_present(
 
     # Check if hash exists
     query_check = "SELECT id FROM present_attributes WHERE present_hash = ?"
-    existing_present = execute_query(query_check, (calculated_hash,))
+    existing_present = db_factory.execute_query(query_check, (calculated_hash,))
 
     if existing_present:
         # Use HTTPException for a more standard error response, or return 200 with a message
@@ -131,7 +131,7 @@ async def add_present(
     )
     
     try:
-        new_id = execute_write(query_insert, params_insert)
+        new_id = db_factory.execute_write(query_insert, params_insert)
         return {
             "message": "Present added for classification.",
             "id": new_id,

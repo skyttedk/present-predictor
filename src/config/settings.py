@@ -29,7 +29,7 @@ class APISettings(BaseSettings):
     description: str = "ML-powered demand prediction system for Gavefabrikken"
     version: str = "0.1.0"
     host: str = Field(default="0.0.0.0", env="API_HOST")
-    port: int = Field(default=8000, env="API_PORT")
+    port: int = Field(default=8000, env="PORT")  # Heroku will override via PORT env var
     reload: bool = Field(default=False, env="API_RELOAD")
     
     # CORS settings

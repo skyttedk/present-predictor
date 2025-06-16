@@ -5,7 +5,7 @@ from typing import List, Dict, Any
 from src.database.presents import get_pending_classification_presents, update_classified_present_attributes
 # Import OpenAI client instead of classifier function
 from src.data.openai_client import create_openai_client, OpenAIClassificationError, GiftAttributes
-from src.database.db import get_db # Corrected import
+# No longer need direct db import - functions use db_factory internally
 
 logger = logging.getLogger(__name__)
 

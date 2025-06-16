@@ -5,7 +5,7 @@ import hashlib
 from typing import Dict, Optional, List, Any
 import logging
 
-from .db import execute_query, execute_write, execute_many
+from . import db_factory
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ def get_cached_present_classification(
         ORDER BY classified_at DESC
         LIMIT 1
     """
-    results = execute_query(query, (present_hash,))
+    results = db_factory.execute_query(query, (present_hash,))
 
     if results:
         logger.debug(f"Cache hit for present_hash: {present_hash}")
@@ -116,7 +116,7 @@ def cache_present_classification(
         status
     )
     
-    cache_id = execute_write(query, params)
+    cache_id = db_factory.execute_write(query, params)
 
     logger.info(f"Cached classification for present_hash: {present_hash}")
     return cache_id
@@ -170,7 +170,7 @@ def batch_cache_present_classifications(
         )
         params_list.append(params)
 
-    count = execute_many(query, params_list)
+    count = db_factory.execute_many(query, params_list)
     logger.info(f"Batch cached {count} present classifications")
     return count
 
@@ -228,7 +228,7 @@ def update_classified_present_attributes(
     """
     params_list.append(present_hash)
     
-    updated_rows = execute_write(query, tuple(params_list))
+    updated_rows = db_factory.execute_write(query, tuple(params_list))
     if updated_rows > 0:
         logger.info(f"Successfully updated attributes for present_hash: {present_hash} to status '{new_status}'")
     else:
@@ -248,7 +248,7 @@ def get_pending_classification_presents() -> List[Dict[str, Any]]:
         FROM present_attributes
         WHERE classification_status = 'pending_classification'
     """
-    results = execute_query(query)
+    results = db_factory.execute_query(query)
     if results:
         logger.info(f"Found {len(results)} presents pending classification.")
     else:
@@ -272,7 +272,7 @@ def get_present_classification_stats() -> Dict[str, Any]:
         FROM present_attributes
     """
 
-    stats_list = execute_query(query)
+    stats_list = db_factory.execute_query(query)
     stats = stats_list[0] if stats_list else {}
 
 
@@ -289,7 +289,7 @@ def get_present_classification_stats() -> Dict[str, Any]:
         LIMIT 10
     """
 
-    categories = execute_query(category_query)
+    categories = db_factory.execute_query(category_query)
 
     return {
         **stats,
@@ -311,7 +311,7 @@ def cleanup_old_present_cache(days: int = 30) -> int:
         WHERE classified_at < datetime('now', '-' || ? || ' days')
     """
 
-    deleted = execute_write(query, (days,))
+    deleted = db_factory.execute_write(query, (days,))
     logger.info(f"Cleaned up {deleted} old present cache entries")
 
     return deleted
@@ -334,7 +334,7 @@ def invalidate_present_cache(present_name: str, model_name: str, model_no: str) 
         SET classification_status = 'invalidated'
         WHERE present_hash = ? AND classification_status != 'invalidated'
     """
-    affected = execute_write(query, (present_hash,))
+    affected = db_factory.execute_write(query, (present_hash,))
 
     if affected > 0:
         logger.info(f"Invalidated cache for present_hash: {present_hash}")

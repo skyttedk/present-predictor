@@ -5,7 +5,7 @@ import json
 from typing import Dict, List, Optional, Any
 import logging
 
-from .db import execute_write, execute_query
+from . import db_factory
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ def log_api_call(
         VALUES (?, ?, ?, ?, ?, ?, ?)
     """
 
-    log_id = execute_write(query, (
+    log_id = db_factory.execute_write(query, (
         user_id,
         api_route,
         json.dumps(request_payload),
@@ -79,7 +79,7 @@ def get_user_api_stats(user_id: int, days: int = 30) -> Dict[str, Any]:
         AND date_time >= datetime('now', '-' || ? || ' days')
     """
 
-    stats_list = execute_query(query, (user_id, days))
+    stats_list = db_factory.execute_query(query, (user_id, days))
     stats = stats_list[0] if stats_list else {}
 
 
@@ -96,7 +96,7 @@ def get_user_api_stats(user_id: int, days: int = 30) -> Dict[str, Any]:
         ORDER BY call_count DESC
     """
 
-    endpoints = execute_query(endpoint_query, (user_id, days))
+    endpoints = db_factory.execute_query(endpoint_query, (user_id, days))
 
     return {
         **stats,
@@ -125,7 +125,7 @@ def get_system_api_stats(hours: int = 24) -> Dict[str, Any]:
         WHERE date_time >= datetime('now', '-' || ? || ' hours')
     """
 
-    stats_list = execute_query(query, (hours,))
+    stats_list = db_factory.execute_query(query, (hours,))
     stats = stats_list[0] if stats_list else {}
 
     # Get top users
@@ -141,7 +141,7 @@ def get_system_api_stats(hours: int = 24) -> Dict[str, Any]:
         LIMIT 10
     """
 
-    top_users = execute_query(user_query, (hours,))
+    top_users = db_factory.execute_query(user_query, (hours,))
 
     return {
         **stats,
@@ -175,7 +175,7 @@ def get_recent_errors(limit: int = 100) -> List[Dict[str, Any]]:
         LIMIT ?
     """
 
-    errors = execute_query(query, (limit,))
+    errors = db_factory.execute_query(query, (limit,))
 
     # Parse JSON payloads
     for error in errors:
@@ -203,7 +203,7 @@ def cleanup_old_logs(days: int = 90) -> int:
         WHERE date_time < datetime('now', '-' || ? || ' days')
     """
 
-    deleted = execute_write(query, (days,))
+    deleted = db_factory.execute_write(query, (days,))
     logger.info(f"Cleaned up {deleted} old API log entries")
 
     return deleted
