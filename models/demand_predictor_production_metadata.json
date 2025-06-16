@@ -1,0 +1,91 @@
+{
+  "model_config": {
+    "n_estimators": 50,
+    "max_depth": 2,
+    "learning_rate": 0.3,
+    "subsample": 1.0,
+    "colsample_bytree": 1.0,
+    "reg_alpha": 1.0,
+    "reg_lambda": 2.0,
+    "gamma": 0.0,
+    "min_child_weight": 1,
+    "max_delta_step": 0,
+    "objective": "reg:squarederror",
+    "eval_metric": "rmse",
+    "random_state": 42,
+    "n_jobs": -1
+  },
+  "feature_names": [
+    "employee_shop",
+    "employee_branch",
+    "employee_gender",
+    "product_main_category",
+    "product_sub_category",
+    "product_brand",
+    "product_color",
+    "product_durability",
+    "product_target_gender",
+    "product_utility_type",
+    "product_type"
+  ],
+  "training_stats": {
+    "model_config": {
+      "n_estimators": 50,
+      "max_depth": 2,
+      "learning_rate": 0.3,
+      "subsample": 1.0,
+      "colsample_bytree": 1.0,
+      "reg_alpha": 1.0,
+      "reg_lambda": 2.0,
+      "gamma": 0.0,
+      "min_child_weight": 1,
+      "max_delta_step": 0,
+      "objective": "reg:squarederror",
+      "eval_metric": "rmse",
+      "random_state": 42,
+      "n_jobs": -1
+    },
+    "training_samples": 78992,
+    "validation_samples": 19749,
+    "feature_count": 11,
+    "feature_names": [
+      "employee_shop",
+      "employee_branch",
+      "employee_gender",
+      "product_main_category",
+      "product_sub_category",
+      "product_brand",
+      "product_color",
+      "product_durability",
+      "product_target_gender",
+      "product_utility_type",
+      "product_type"
+    ],
+    "train_metrics": {
+      "mae": 1.0215392112731934,
+      "rmse": 2.3704218658785416,
+      "r2": 0.09832006692886353,
+      "mape": 0.5968247652053833
+    },
+    "validation_metrics": {
+      "mae": 1.0254853963851929,
+      "rmse": 2.5878032856724085,
+      "r2": 0.09216415882110596,
+      "mape": 0.5959868431091309
+    },
+    "cross_validation": {
+      "mean_r2": 0.0329074501991272,
+      "std_r2": 0.026782664715650824,
+      "scores": [
+        0.05926483869552612,
+        0.06323003768920898,
+        0.030983150005340576,
+        0.020852625370025635,
+        -0.009793400764465332
+      ]
+    },
+    "feature_importance": {},
+    "small_dataset_warning": false
+  },
+  "is_trained": true
+}
