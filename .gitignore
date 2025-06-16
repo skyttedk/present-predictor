@@ -215,3 +215,8 @@ data/processed/
 *.bak
 *.backup
 *.old
+# CatBoost specific
+catboost_info/
+
+# Generated reports
+reports/
