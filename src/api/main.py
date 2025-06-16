@@ -103,7 +103,7 @@ async def add_present(
     calculated_hash = hashlib.md5(text_to_hash.encode('utf-8')).hexdigest()
 
     # Check if hash exists
-    query_check = "SELECT id FROM present_attributes WHERE present_hash = ?"
+    query_check = "SELECT id FROM present_attributes WHERE present_hash = %s"
     existing_present = db_factory.execute_query(query_check, (calculated_hash,))
 
     if existing_present:
@@ -119,7 +119,7 @@ async def add_present(
     query_insert = """
         INSERT INTO present_attributes
         (present_name, model_name, model_no, present_vendor, present_hash, classification_status)
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s)
     """
     params_insert = (
         present_name,

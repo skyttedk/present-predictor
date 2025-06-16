@@ -53,8 +53,9 @@ def get_db():
             conn.close()
 
 def init_database():
-    """Initialize database with PostgreSQL schema."""
-    schema_path = os.path.join(os.path.dirname(__file__), "schema_postgres.sql")
+    """Initialize database with PostgreSQL schema only if tables don't exist."""
+    # Use the safe initialization schema that doesn't drop existing tables
+    schema_path = os.path.join(os.path.dirname(__file__), "schema_postgres_init.sql")
 
     if not os.path.exists(schema_path):
         raise FileNotFoundError(f"Schema file not found: {schema_path}")

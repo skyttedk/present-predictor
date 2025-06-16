@@ -43,7 +43,7 @@ def get_cached_present_classification(
     present_hash = get_present_hash(present_name, model_name, model_no)
     query = """
         SELECT * FROM present_attributes
-        WHERE present_hash = ?
+        WHERE present_hash = %s
         AND classification_status = 'success'
         ORDER BY classified_at DESC
         LIMIT 1
@@ -243,18 +243,18 @@ def update_classified_present_attributes(
 
     for attr_key, db_col in attribute_map.items():
         if attr_key in attributes and attributes[attr_key] is not None:
-            fields_to_set.append(f"{db_col} = ?")
+            fields_to_set.append(f"{db_col} = %s")
             params_list.append(attributes[attr_key])
 
-    fields_to_set.append("classification_status = ?")
+    fields_to_set.append("classification_status = %s")
     params_list.append(new_status)
     fields_to_set.append("classified_at = CURRENT_TIMESTAMP") # Update timestamp
 
     if thread_id:
-        fields_to_set.append("thread_id = ?")
+        fields_to_set.append("thread_id = %s")
         params_list.append(thread_id)
     if run_id:
-        fields_to_set.append("run_id = ?")
+        fields_to_set.append("run_id = %s")
         params_list.append(run_id)
     
     if not fields_to_set: # Should not happen if at least status is being updated
@@ -264,7 +264,7 @@ def update_classified_present_attributes(
     query = f"""
         UPDATE present_attributes
         SET {', '.join(fields_to_set)}
-        WHERE present_hash = ?
+        WHERE present_hash = %s
     """
     params_list.append(present_hash)
     
@@ -372,7 +372,7 @@ def invalidate_present_cache(present_name: str, model_name: str, model_no: str) 
     query = """
         UPDATE present_attributes
         SET classification_status = 'invalidated'
-        WHERE present_hash = ? AND classification_status != 'invalidated'
+        WHERE present_hash = %s AND classification_status != 'invalidated'
     """
     affected = db_factory.execute_write(query, (present_hash,))
 

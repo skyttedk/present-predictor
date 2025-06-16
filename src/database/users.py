@@ -72,7 +72,7 @@ def authenticate_user(api_key: str) -> Optional[Dict]:
     query = """
         SELECT id, username, is_active, created_at, updated_at
         FROM "user"
-        WHERE api_key = %s AND is_active = 1
+        WHERE api_key = %s AND is_active = true
     """
     users = db_factory.execute_query(query, (hashed_key,))
 
@@ -99,7 +99,7 @@ def list_users(active_only: bool = False) -> List[Dict]:
         FROM "user"
     """
     if active_only:
-        query += " WHERE is_active = 1"
+        query += " WHERE is_active = true"
     query += " ORDER BY created_at DESC"
 
     return db_factory.execute_query(query)
@@ -114,7 +114,7 @@ def deactivate_user(username: str) -> bool:
     Returns:
         True if user was deactivated, False if user not found
     """
-    query = 'UPDATE "user" SET is_active = 0 WHERE username = %s'
+    query = 'UPDATE "user" SET is_active = false WHERE username = %s'
     affected = db_factory.execute_write(query, (username,))
 
     if affected > 0:
@@ -132,7 +132,7 @@ def reactivate_user(username: str) -> bool:
     Returns:
         True if user was reactivated, False if user not found
     """
-    query = 'UPDATE "user" SET is_active = 1 WHERE username = %s'
+    query = 'UPDATE "user" SET is_active = true WHERE username = %s'
     affected = db_factory.execute_write(query, (username,))
 
     if affected > 0:

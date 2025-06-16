@@ -349,7 +349,7 @@ def reset_failed_presents(status_filter: str, dry_run: bool):
                 SELECT COUNT(*) as count, classification_status,
                        COUNT(DISTINCT classification_status) as status_count
                 FROM present_attributes
-                WHERE classification_status LIKE ?
+                WHERE classification_status LIKE %s
                 GROUP BY classification_status
             """, (status_filter,))
             
@@ -382,7 +382,7 @@ def reset_failed_presents(status_filter: str, dry_run: bool):
                 SET classification_status = 'pending_classification',
                     thread_id = NULL,
                     run_id = NULL
-                WHERE classification_status LIKE ?
+                WHERE classification_status LIKE %s
             """, (status_filter,))
             
             affected = cursor.rowcount
@@ -427,13 +427,13 @@ def import_presents_csv(csv_path: Path):
 
     conn = None
     try:
-        conn = get_db_connection()
+        conn = get_db()
         cursor = conn.cursor()
 
         for index, row in df.iterrows():
             present_hash = row['present_hash']
             try:
-                cursor.execute("SELECT 1 FROM present_attributes WHERE present_hash = ?", (present_hash,))
+                cursor.execute("SELECT 1 FROM present_attributes WHERE present_hash = %s", (present_hash,))
                 exists = cursor.fetchone()
 
                 if exists:
@@ -470,7 +470,7 @@ def import_presents_csv(csv_path: Path):
                 # Or that pandas `str(row['...']) if pd.notna(...) else None` handles it.
 
                 columns = ', '.join(data_to_insert.keys())
-                placeholders = ', '.join(['?'] * len(data_to_insert))
+                placeholders = ', '.join(['%s'] * len(data_to_insert))
                 sql = f"INSERT INTO present_attributes ({columns}) VALUES ({placeholders})"
                 
                 cursor.execute(sql, tuple(data_to_insert.values()))
