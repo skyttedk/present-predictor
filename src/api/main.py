@@ -5,12 +5,48 @@ import hashlib
 
 from src.api.schemas.requests import AddPresentRequest
 from src.database.users import authenticate_user
-from src.database.db import execute_query, execute_write
+from src.database.db import execute_query, execute_write, init_database
+import logging
+from contextlib import asynccontextmanager
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from src.scheduler.tasks import fetch_pending_present_attributes
+from src.config.settings import settings
+
+# Configure logging
+# Ensure settings.LOG_LEVEL is defined in your src.config.settings
+# Defaulting to INFO if not found or for simplicity in this example.
+LOG_LEVEL = getattr(settings, "LOG_LEVEL", "INFO").upper()
+logging.basicConfig(level=LOG_LEVEL, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+scheduler = AsyncIOScheduler()
+
+@asynccontextmanager
+async def lifespan(app_instance: FastAPI): # Renamed app to app_instance to avoid conflict
+    # Startup
+    logger.info("Application startup: Initializing database...")
+    init_database()
+    logger.info("Application startup: Database initialized.")
+    
+    logger.info("Application startup: Starting scheduler...")
+    scheduler.add_job(fetch_pending_present_attributes, "interval", minutes=10, id="fetch_attributes_job")
+    scheduler.start()
+    logger.info("Application startup: Scheduler started. Job 'fetch_attributes_job' scheduled every 10 minutes.")
+    
+    yield
+    
+    # Shutdown
+    logger.info("Application shutdown: Stopping scheduler...")
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
+    logger.info("Application shutdown: Scheduler stopped.")
+    logger.info("Application shutdown complete.")
 
 app = FastAPI(
     title="Predictive Gift Selection API",
-    description="API for predicting gift selection quantities.",
-    version="0.1.0",
+    description="API for predicting gift selection quantities and managing scheduled tasks.",
+    version="0.1.1", # Bump version
+    lifespan=lifespan
 )
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)

@@ -174,6 +174,86 @@ def batch_cache_present_classifications(
     logger.info(f"Batch cached {count} present classifications")
     return count
 
+def update_classified_present_attributes(
+    present_hash: str,
+    attributes: Dict[str, Any],
+    new_status: str,
+    thread_id: Optional[str] = None,
+    run_id: Optional[str] = None
+) -> int:
+    """
+    Updates the attributes and status of an already existing present classification entry.
+    Uses specific fields from the attributes dictionary.
+    """
+    fields_to_set = []
+    params_list = []
+
+    attribute_map = {
+        "itemMainCategory": "item_main_category",
+        "itemSubCategory": "item_sub_category",
+        "color": "color",
+        "brand": "brand",
+        "vendor": "vendor", 
+        "valuePrice": "value_price",
+        "targetDemographic": "target_demographic",
+        "utilityType": "utility_type",
+        "durability": "durability",
+        "usageType": "usage_type",
+    }
+
+    for attr_key, db_col in attribute_map.items():
+        if attr_key in attributes and attributes[attr_key] is not None:
+            fields_to_set.append(f"{db_col} = ?")
+            params_list.append(attributes[attr_key])
+
+    fields_to_set.append("classification_status = ?")
+    params_list.append(new_status)
+    fields_to_set.append("classified_at = datetime('now')") # Update timestamp
+
+    if thread_id:
+        fields_to_set.append("thread_id = ?")
+        params_list.append(thread_id)
+    if run_id:
+        fields_to_set.append("run_id = ?")
+        params_list.append(run_id)
+    
+    if not fields_to_set: # Should not happen if at least status is being updated
+        logger.warning(f"No fields to update for present_hash: {present_hash} (this is unexpected).")
+        return 0
+
+    query = f"""
+        UPDATE present_attributes
+        SET {', '.join(fields_to_set)}
+        WHERE present_hash = ?
+    """
+    params_list.append(present_hash)
+    
+    updated_rows = execute_write(query, tuple(params_list))
+    if updated_rows > 0:
+        logger.info(f"Successfully updated attributes for present_hash: {present_hash} to status '{new_status}'")
+    else:
+        logger.warning(f"Failed to update or no record found for present_hash: {present_hash} with status '{new_status}'")
+    return updated_rows
+
+def get_pending_classification_presents() -> List[Dict[str, Any]]:
+    """
+    Retrieves all presents that are pending classification.
+
+    Returns:
+        List of dictionaries, each representing a present pending classification.
+        Includes present_hash, present_name, present_vendor, model_name, model_no.
+    """
+    query = """
+        SELECT present_hash, present_name, present_vendor, model_name, model_no
+        FROM present_attributes
+        WHERE classification_status = 'pending_classification'
+    """
+    results = execute_query(query)
+    if results:
+        logger.info(f"Found {len(results)} presents pending classification.")
+    else:
+        logger.info("No presents found pending classification.")
+    return results
 def get_present_classification_stats() -> Dict[str, Any]:
     """
     Get statistics about the present classification cache.

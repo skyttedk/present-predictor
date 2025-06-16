@@ -13,7 +13,7 @@ from dataclasses import dataclass
 import httpx
 from pydantic import ValidationError
 
-from ..config.settings import get_settings
+from ..config.settings import settings # Import the global settings instance
 from .schemas.data_models import GiftAttributes
 
 logger = logging.getLogger(__name__)
@@ -40,14 +40,17 @@ class OpenAIAssistantClient:
     Implements the same pattern as the Business Central integration.
     """
     
-    def __init__(self, config: Optional[OpenAIConfig] = None):
-        if config is None:
-            api_key = os.getenv("OPENAI_API_KEY")
-            if not api_key:
-                raise ValueError("OPENAI_API_KEY environment variable is required")
-            config = OpenAIConfig(api_key=api_key)
+    def __init__(self): # Removed config parameter, will use global settings
+        if not settings.openai.api_key:
+            raise ValueError("OPENAI_API_KEY is not set in the environment or .env file.")
         
-        self.config = config
+        # Use settings from the global 'settings' object
+        self.config = OpenAIConfig(
+            api_key=settings.openai.api_key,
+            assistant_id=settings.openai.assistant_id
+            # base_url, timeout, max_retries will use defaults from OpenAIConfig dataclass
+            # or could also be added to OpenAISettings and .env if needed
+        )
         self.client = httpx.AsyncClient(
             timeout=config.timeout,
             headers={
@@ -57,7 +60,7 @@ class OpenAIAssistantClient:
             }
         )
     
-    async def classify_product(self, description: str) -> GiftAttributes:
+    async def classify_product(self, description: str) -> tuple[GiftAttributes, str, str]:
         """
         Classify a product description using OpenAI Assistant.
         
@@ -65,7 +68,7 @@ class OpenAIAssistantClient:
             description: Product description to classify
             
         Returns:
-            GiftAttributes: Classified product attributes
+            Tuple of (GiftAttributes, thread_id, run_id)
             
         Raises:
             OpenAIClassificationError: If classification fails
@@ -73,6 +76,8 @@ class OpenAIAssistantClient:
         if not description or not description.strip():
             raise OpenAIClassificationError("Product description cannot be empty")
         
+        thread_id = ""
+        run_id = ""
         try:
             # Step 1: Create thread
             thread_id = await self._create_thread()
@@ -90,11 +95,13 @@ class OpenAIAssistantClient:
             response_data = await self._get_thread_messages(thread_id)
             
             # Step 6: Parse and validate response
-            return self._parse_classification_response(response_data)
+            attributes = self._parse_classification_response(response_data)
+            return attributes, thread_id, run_id
             
         except Exception as e:
-            logger.error(f"Product classification failed for '{description}': {e}")
-            raise OpenAIClassificationError(f"Classification failed: {e}")
+            logger.error(f"Product classification failed for '{description}' (Thread: {thread_id}, Run: {run_id}): {e}")
+            # Ensure thread_id and run_id are returned even in case of failure for logging, if they were created
+            raise OpenAIClassificationError(f"Classification failed (Thread: {thread_id}, Run: {run_id}): {e}")
     
     async def _create_thread(self) -> str:
         """Create a new conversation thread."""
@@ -264,11 +271,12 @@ import asyncio
 
 
 def create_openai_client() -> OpenAIAssistantClient:
-    """Create an OpenAI Assistant client with default configuration."""
+    """Create an OpenAI Assistant client using global settings."""
+    # __init__ now uses global settings, so no need to pass config
     return OpenAIAssistantClient()
 
 
-async def classify_product_description(description: str) -> GiftAttributes:
+async def classify_product_description(description: str) -> tuple[GiftAttributes, str, str]:
     """
     Convenience function to classify a single product description.
     
@@ -276,7 +284,7 @@ async def classify_product_description(description: str) -> GiftAttributes:
         description: Product description to classify
         
     Returns:
-        GiftAttributes: Classified attributes
+        Tuple of (GiftAttributes, thread_id, run_id)
     """
     async with create_openai_client() as client:
         return await client.classify_product(description)

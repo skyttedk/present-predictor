@@ -78,6 +78,66 @@ class SecuritySettings(BaseSettings):
     rate_limit_period: int = Field(default=60, env="RATE_LIMIT_PERIOD")
 
 
+class OpenAISettings(BaseSettings):
+    """OpenAI specific configuration settings."""
+    api_key: Optional[str] = Field(default=None, env="OPENAI_API_KEY")
+    assistant_id: str = Field(default="asst_BuFvA6iXF4xSyQ4px7Q5zjiN", env="OPENAI_ASSISTANT_ID")
+
+    class Config:
+        # env_prefix = "OPENAI_" # Not using prefix as .env keys are direct
+        pass
+
+class CatBoostModelSettings(BaseSettings):
+    """CatBoost specific model configuration settings."""
+    iterations: int = Field(default=1000, env="CATBOOST_ITERATIONS")
+    loss_function: str = Field(default="Poisson", env="CATBOOST_LOSS_FUNCTION")
+    eval_metric: str = Field(default="R2", env="CATBOOST_EVAL_METRIC")
+    learning_rate: float = Field(default=0.05, env="CATBOOST_LEARNING_RATE")
+    depth: int = Field(default=6, env="CATBOOST_DEPTH")
+    l2_leaf_reg: float = Field(default=3.0, env="CATBOOST_L2_LEAF_REG")
+    early_stopping_rounds: int = Field(default=50, env="CATBOOST_EARLY_STOPPING_ROUNDS")
+    # CATBOOST_RANDOM_SEED can be part of general ModelSettings if a single seed is preferred.
+    # If a specific seed for CatBoost is needed, add:
+    # catboost_random_seed: int = Field(default=42, env="CATBOOST_RANDOM_SEED")
+
+
+    class Config:
+        pass # No env_prefix needed as .env keys are direct and mapped via 'env'
+
+class ModelSettings(BaseSettings):
+    """General model and training configuration settings."""
+    random_seed: int = Field(default=42, env="MODEL_RANDOM_SEED")
+    reproducible_results: bool = Field(default=True, env="MODEL_REPRODUCIBLE_RESULTS")
+    version: str = Field(default="1.0.0", env="MODEL_VERSION")
+    name: str = Field(default="gavefabrikken_demand_predictor", env="MODEL_NAME")
+
+    # Feature Engineering
+    feature_engineering_categorical_encoding_method: str = Field(default="onehot", env="MODEL_FEATURE_ENGINEERING_CATEGORICAL_ENCODING_METHOD")
+    feature_engineering_numerical_scaling_method: str = Field(default="standard", env="MODEL_FEATURE_ENGINEERING_NUMERICAL_SCALING_METHOD")
+    feature_engineering_feature_selection_enabled: bool = Field(default=True, env="MODEL_FEATURE_ENGINEERING_FEATURE_SELECTION_ENABLED")
+    feature_engineering_extract_temporal_features: bool = Field(default=True, env="MODEL_FEATURE_ENGINEERING_EXTRACT_TEMPORAL_FEATURES")
+
+    # Data Validation
+    data_validation_missing_value_threshold: float = Field(default=0.3, env="MODEL_DATA_VALIDATION_MISSING_VALUE_THRESHOLD")
+    data_validation_outlier_detection_enabled: bool = Field(default=True, env="MODEL_DATA_VALIDATION_OUTLIER_DETECTION_ENABLED")
+    data_validation_outlier_method: str = Field(default="iqr", env="MODEL_DATA_VALIDATION_OUTLIER_METHOD")
+    data_validation_min_records_per_category: int = Field(default=5, env="MODEL_DATA_VALIDATION_MIN_RECORDS_PER_CATEGORY")
+
+    # Model Training
+    training_train_test_split_ratio: float = Field(default=0.8, env="MODEL_TRAINING_TRAIN_TEST_SPLIT_RATIO")
+    training_validation_split_ratio: float = Field(default=0.2, env="MODEL_TRAINING_VALIDATION_SPLIT_RATIO")
+    training_cv_folds: int = Field(default=5, env="MODEL_TRAINING_CV_FOLDS")
+    training_model_save_path: str = Field(default="models/catboost_poisson_model", env="MODEL_TRAINING_MODEL_SAVE_PATH")
+
+    # Prediction Settings
+    prediction_min_prediction_value: float = Field(default=0.0, env="MODEL_PREDICTION_MIN_PREDICTION_VALUE")
+    prediction_max_prediction_value: float = Field(default=10000.0, env="MODEL_PREDICTION_MAX_PREDICTION_VALUE")
+    prediction_round_predictions: bool = Field(default=True, env="MODEL_PREDICTION_ROUND_PREDICTIONS")
+    prediction_max_batch_size: int = Field(default=1000, env="MODEL_PREDICTION_MAX_BATCH_SIZE")
+    
+    class Config:
+        pass # No env_prefix needed
+
 class Settings(BaseSettings):
     """Main application settings combining all configuration sections."""
     
@@ -91,11 +151,15 @@ class Settings(BaseSettings):
     data: DataSettings = DataSettings()
     logging: LoggingSettings = LoggingSettings()
     security: SecuritySettings = SecuritySettings()
+    openai: OpenAISettings = OpenAISettings()
+    model_general: ModelSettings = ModelSettings()
+    model_catboost: CatBoostModelSettings = CatBoostModelSettings()
     
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = False
+        extra = 'ignore'  # Allow and ignore extra fields from .env at the top level
         protected_namespaces = ()
         
     @property
