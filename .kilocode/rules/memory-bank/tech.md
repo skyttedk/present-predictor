@@ -24,11 +24,12 @@
   - Enums: targetDemographic (male/female/unisex), utilityType (practical/work/aesthetic/status/sentimental/exclusive), durability (consumable/durable), usageType (shareable/individual)
 
 ### Machine Learning
-- **XGBoost**: Gradient boosting framework
-  - `XGBRegressor` for demand quantity prediction
+- **CatBoost**: Gradient boosting framework
+  - `CatBoostRegressor` for demand quantity prediction (Poisson loss)
+  - Native handling of categorical features
   - Built-in feature importance analysis
   - Cross-validation support
-  - Performance optimization for tabular data
+  - Robust to overfitting
 
 - **Scikit-learn**: ML utilities and metrics
   - Model evaluation metrics (MAE, RMSE, R²)
@@ -48,7 +49,7 @@
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 pandas>=2.0.0
-xgboost>=1.7.0
+catboost>=1.2.0  # Updated from xgboost
 scikit-learn>=1.3.0
 pydantic>=2.0.0
 numpy>=1.24.0
@@ -90,7 +91,7 @@ passlib[bcrypt]>=1.7.4  # Password hashing
 - **Python Version**: 3.9+ for modern type hints and features
 - **Memory**: Minimum 4GB RAM for model training
 - **Storage**: Sufficient space for historical data and models
-- **CPU**: Multi-core support for XGBoost training
+- **CPU**: Multi-core support for CatBoost training
 
 ## Development Setup
 
@@ -140,10 +141,11 @@ pip install -r requirements-dev.txt
 - **NumPy Arrays**: Numerical computations
 - **Custom Classifiers**: Gift categorization logic
 - **Shop-level Aggregates**: Creation of features like shop diversity and most frequent items.
+- **Interaction Features**: Hashing for combined categorical features.
 
 ### Model Operations
-- **XGBoost API**: Model training and inference
-- **Pickle/Joblib**: Model serialization
+- **CatBoost API**: Model training and inference
+- **CatBoost Model Format / Pickle/Joblib**: Model serialization
 - **Scikit-learn Pipelines**: Feature preprocessing
 
 ### Output Generation
@@ -182,8 +184,8 @@ pip install -r requirements-dev.txt
 ### Data Science Workflow
 1. **Exploration**: Jupyter notebooks for data analysis
 2. **Feature Engineering**: Pandas for data transformation
-3. **Model Training**: XGBoost for regression models
-4. **Evaluation**: Scikit-learn for metrics
+3. **Model Training**: CatBoost for regression models (Poisson)
+4. **Evaluation**: Scikit-learn for metrics, Optuna for hyperparameter tuning
 5. **Validation**: Cross-validation for model selection
 
 ### Deployment Workflow (Future)
