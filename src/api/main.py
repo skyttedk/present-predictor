@@ -161,7 +161,7 @@ async def predict_endpoint(
         else:
             text_to_hash = f"{present.description} - {present.model_name} - {present.model_no}."
         
-        present_hash = hashlib.md5(text_to_hash.encode('utf-8')).hexdigest()
+        present_hash = hashlib.md5(text_to_hash.encode('utf-8')).hexdigest().upper()
         
         # Lookup in database
         attributes = get_present_by_hash(present_hash)
@@ -235,7 +235,7 @@ async def add_present(
     else:
         text_to_hash = f"{present_name} - {model_name} - {model_no}."
     
-    calculated_hash = hashlib.md5(text_to_hash.encode('utf-8')).hexdigest()
+    calculated_hash = hashlib.md5(text_to_hash.encode('utf-8')).hexdigest().upper()
 
     # Check if hash exists
     query_check = "SELECT id FROM present_attributes WHERE present_hash = %s"
