@@ -189,29 +189,6 @@ class ValidationErrorResponse(BaseModel):
         json_schema_extra = {
             "example": {
                 "error_code": "VALIDATION_ERROR",
-                "error_message": "Invalid request data provided",
-                "details": {
-                    "field": "branch_no",
-                    "issue": "Field is required"
-                },
-                "timestamp": "2025-12-06T18:00:00Z",
-                "request_id": "req_123456789"
-            }
-        }
-
-
-class ValidationErrorResponse(BaseModel):
-    """Validation error response with field-specific details."""
-    
-    error_code: str = Field(default="VALIDATION_ERROR", description="Error code")
-    error_message: str = Field(..., description="General error message")
-    validation_errors: List[Dict[str, Any]] = Field(..., description="Field-specific validation errors")
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Error timestamp")
-    
-    class Config:
-        schema_extra = {
-            "example": {
-                "error_code": "VALIDATION_ERROR",
                 "error_message": "Request validation failed",
                 "validation_errors": [
                     {
@@ -226,5 +203,65 @@ class ValidationErrorResponse(BaseModel):
                     }
                 ],
                 "timestamp": "2025-12-06T18:00:00Z"
+            }
+        }
+
+
+class CSVImportSummary(BaseModel):
+    """Summary statistics for CSV import operation."""
+    
+    imported_count: int = Field(..., description="Number of presents successfully imported", ge=0)
+    skipped_count: int = Field(..., description="Number of presents skipped (already exist)", ge=0)
+    error_count: int = Field(..., description="Number of presents with import errors", ge=0)
+    total_processed: int = Field(..., description="Total number of rows processed", ge=0)
+    
+    @validator('total_processed')
+    def validate_total(cls, v, values):
+        """Ensure total matches sum of other counts."""
+        expected_total = values.get('imported_count', 0) + values.get('skipped_count', 0) + values.get('error_count', 0)
+        if v != expected_total:
+            raise ValueError(f"Total processed ({v}) should equal sum of imported, skipped, and error counts ({expected_total})")
+        return v
+
+
+class CSVImportResponse(BaseModel):
+    """Response model for CSV import operation."""
+    
+    message: str = Field(..., description="Success or failure message")
+    summary: CSVImportSummary = Field(..., description="Import operation summary")
+    processing_time_ms: Optional[float] = Field(None, description="Processing time in milliseconds", ge=0)
+    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Import timestamp")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "message": "CSV import completed successfully",
+                "summary": {
+                    "imported_count": 150,
+                    "skipped_count": 25,
+                    "error_count": 5,
+                    "total_processed": 180
+                },
+                "processing_time_ms": 2500.0,
+                "timestamp": "2025-06-17T08:00:00Z"
+            }
+        }
+
+
+class DeleteAllPresentsResponse(BaseModel):
+    """Response model for delete all presents operation."""
+    
+    message: str = Field(..., description="Success message")
+    deleted_count: int = Field(..., description="Number of presents deleted", ge=0)
+    processing_time_ms: Optional[float] = Field(None, description="Processing time in milliseconds", ge=0)
+    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Delete timestamp")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "message": "All presents deleted successfully",
+                "deleted_count": 8913,
+                "processing_time_ms": 120.5,
+                "timestamp": "2025-06-17T09:31:00Z"
             }
         }

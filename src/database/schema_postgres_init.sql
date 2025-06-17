@@ -19,12 +19,20 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
--- Create trigger for user table (drop and recreate to ensure it's up to date)
-DROP TRIGGER IF EXISTS update_user_timestamp ON "user";
-CREATE TRIGGER update_user_timestamp 
-    BEFORE UPDATE ON "user" 
-    FOR EACH ROW 
-    EXECUTE FUNCTION update_updated_at_column();
+-- Create trigger for user table only if it doesn't exist
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.triggers
+        WHERE trigger_name = 'update_user_timestamp'
+        AND event_object_table = 'user'
+    ) THEN
+        CREATE TRIGGER update_user_timestamp
+            BEFORE UPDATE ON "user"
+            FOR EACH ROW
+            EXECUTE FUNCTION update_updated_at_column();
+    END IF;
+END $$;
 
 -- Create user_api_call_log table only if it doesn't exist
 CREATE TABLE IF NOT EXISTS user_api_call_log (

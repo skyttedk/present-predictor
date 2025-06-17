@@ -400,105 +400,37 @@ def import_presents_csv(csv_path: Path):
     click.echo(f"Attempting to import presents from: {csv_path}")
 
     try:
-        df = pd.read_csv(csv_path, keep_default_na=False, na_values=['']) # Treat empty strings as NA, but keep actual "NA" strings if any
-    except FileNotFoundError:
-        click.echo(f"❌ Error: CSV file not found at {csv_path}", err=True)
-        sys.exit(1)
-    except pd.errors.EmptyDataError:
-        click.echo(f"❌ Error: CSV file at {csv_path} is empty.", err=True)
-        sys.exit(1)
-    except Exception as e:
-        click.echo(f"❌ Error reading CSV file: {e}", err=True)
-        sys.exit(1)
-
-    required_columns = {
-        'present_hash', 'present_name', 'present_vendor', 'model_name', 'model_no',
-        'item_main_category', 'item_sub_category', 'color', 'brand', 'vendor',
-        'target_demographic', 'utility_type', 'durability', 'usage_type'
-    }
-    missing_columns = required_columns - set(df.columns)
-    if missing_columns:
-        click.echo(f"❌ Error: CSV file is missing required columns: {', '.join(missing_columns)}", err=True)
-        sys.exit(1)
-
-    imported_count = 0
-    skipped_count = 0
-    error_count = 0
-
-    conn = None
-    try:
-        conn = get_db()
-        cursor = conn.cursor()
-
-        for index, row in df.iterrows():
-            present_hash = row['present_hash']
-            try:
-                cursor.execute("SELECT 1 FROM present_attributes WHERE present_hash = %s", (present_hash,))
-                exists = cursor.fetchone()
-
-                if exists:
-                    click.echo(f"⏭️ Skipping existing present_hash: {present_hash}")
-                    skipped_count += 1
-                    continue
-
-                # Prepare data for insertion
-                # Convert pandas NA (often NaN for empty strings if not handled by keep_default_na/na_values) to None
-                data_to_insert = {
-                    "present_hash": present_hash,
-                    "present_name": str(row['present_name']) if pd.notna(row['present_name']) else None,
-                    "present_vendor": str(row['present_vendor']) if pd.notna(row['present_vendor']) else None,
-                    "model_name": str(row['model_name']) if pd.notna(row['model_name']) else None,
-                    "model_no": str(row['model_no']) if pd.notna(row['model_no']) else None,
-                    "item_main_category": str(row['item_main_category']) if pd.notna(row['item_main_category']) else None,
-                    "item_sub_category": str(row['item_sub_category']) if pd.notna(row['item_sub_category']) else None,
-                    "color": str(row['color']) if pd.notna(row['color']) else None,
-                    "brand": str(row['brand']) if pd.notna(row['brand']) else None,
-                    "vendor": str(row['vendor']) if pd.notna(row['vendor']) else None, # Classified vendor
-                    "value_price": None, # As per user request
-                    "target_demographic": str(row['target_demographic']) if pd.notna(row['target_demographic']) else None,
-                    "utility_type": str(row['utility_type']) if pd.notna(row['utility_type']) else None,
-                    "durability": str(row['durability']) if pd.notna(row['durability']) else None,
-                    "usage_type": str(row['usage_type']) if pd.notna(row['usage_type']) else None,
-                    "classified_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-                    "classification_status": "success", # Pre-classified
-                    "thread_id": None,
-                    "run_id": None,
-                }
-                
-                # Ensure all required string fields that are not nullable in DB are not None
-                # For simplicity, assuming all text fields in DB can be NULL or have defaults if not provided
-                # Or that pandas `str(row['...']) if pd.notna(...) else None` handles it.
-
-                columns = ', '.join(data_to_insert.keys())
-                placeholders = ', '.join(['%s'] * len(data_to_insert))
-                sql = f"INSERT INTO present_attributes ({columns}) VALUES ({placeholders})"
-                
-                cursor.execute(sql, tuple(data_to_insert.values()))
-                imported_count += 1
-                if imported_count % 100 == 0: # Log progress
-                    click.echo(f"Processed {index + 1} rows, Imported: {imported_count}, Skipped: {skipped_count}...")
-
-            except Exception as e_row:
-                click.echo(f"❌ Error processing row {index + 2} (present_hash: {present_hash}): {e_row}", err=True)
-                error_count += 1
-                # Optionally, decide if you want to rollback or continue on row error
+        from .csv_import import import_presents_from_file
         
-        conn.commit()
+        result = import_presents_from_file(csv_path)
+        
+        # Display progress during import (simplified)
+        imported_count = result['imported_count']
+        skipped_count = result['skipped_count']
+        error_count = result['error_count']
+        errors = result['errors']
+        
         click.echo("\n--- Import Summary ---")
         click.echo(f"✅ Successfully imported: {imported_count} presents")
         click.echo(f"⏭️ Skipped (already exist): {skipped_count} presents")
+        
         if error_count > 0:
             click.echo(f"❌ Errors encountered: {error_count} presents", err=True)
+            if errors:
+                click.echo("\nFirst few errors:")
+                for error in errors[:5]:  # Show first 5 errors
+                    click.echo(f"  - {error}", err=True)
+                if len(errors) > 5:
+                    click.echo(f"  ... and {len(errors) - 5} more errors", err=True)
+        
         click.echo("----------------------")
 
+    except ValueError as e:
+        click.echo(f"❌ Error: {e}", err=True)
+        sys.exit(1)
     except Exception as e:
-        if conn:
-            conn.rollback()
         click.echo(f"❌ An unexpected error occurred during import: {e}", err=True)
         sys.exit(1)
-    finally:
-        if conn:
-            conn.close()
 
 
 if __name__ == '__main__':

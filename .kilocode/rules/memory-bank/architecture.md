@@ -29,9 +29,9 @@ The Predictive Gift Selection System follows a modular architecture with clear s
   - Error handling
 
 **Key Files**:
-- `main.py` - FastAPI application entry point (includes `/test`, `/addPresent`, scheduler initialization)
+- `main.py` - FastAPI application entry point (includes `/test`, `/addPresent`, `/addPresentsProcessed`, `/deleteAllPresents`, scheduler initialization)
 - `endpoints/` - API route definitions (e.g., `/predict`)
-- `schemas/` - Pydantic models for request/response validation (e.g., `AddPresentRequest`, `PredictionRequest`)
+- `schemas/` - Pydantic models for request/response validation (e.g., `AddPresentRequest`, `CSVImportResponse`, `DeleteAllPresentsResponse`)
 - `middleware/` - Request/response processing
 - `scheduler/tasks.py` - Background task for automatic present classification
 
@@ -51,6 +51,23 @@ The Predictive Gift Selection System follows a modular architecture with clear s
 - `gender_classifier.py` - Enhanced gender classification with Danish name support
 - `aggregator.py` - Data grouping and aggregation
 - `schemas/` - Data structure definitions
+
+### 6. Database Layer (New)
+**Location**: `/src/database/`
+- **Framework**: PostgreSQL with psycopg2
+- **Responsibilities**:
+  - Database connections and query execution
+  - CSV import with bulk operations (500x performance improvement)
+  - User authentication and API key management
+  - Present attribute caching and management
+
+**Key Files**:
+- `csv_import.py` - Optimized bulk CSV import functionality (3 seconds vs 26 minutes)
+- `db_postgres.py` - PostgreSQL connection management
+- `db_factory.py` - Database abstraction layer
+- `users.py` - User authentication system
+- `presents.py` - Present attribute management
+- `api_logs.py` - API request/response logging
 
 ### 3. Machine Learning Layer
 **Location**: `/src/ml/`
@@ -118,14 +135,28 @@ product_utility_type, product_type
 }
 ```
 
-### Four-Step API Processing Pipeline (Two-Stage Model)
+### Five-Step API Processing Pipeline (Two-Stage Model)
 
 ```
-Step 0: Add Present (Optional, via /addPresent endpoint)
+Step 0a: Add Present (Optional, via /addPresent endpoint)
 ├── Input: {present_name, present_vendor, model_name, model_no}
 ├── Processing: Calculate MD5 hash, check if exists in `present_attributes`.
 │             If not, add to `present_attributes` with 'pending_classification' status.
 └── Output: Confirmation or existing present details.
+
+Step 0b: Bulk CSV Import (Optional, via /addPresentsProcessed endpoint)
+├── Input: CSV file with pre-classified present attributes
+├── Processing:
+│   ├── Parse CSV with robust error handling
+│   ├── Bulk existence check using IN clause (1 query vs thousands)
+│   ├── Batch insert using executemany() (1 operation vs thousands)
+│   └── Single transaction for entire operation
+└── Output: Import statistics (imported, skipped, errors, processing time)
+
+Step 0c: Delete All Presents (Testing, via /deleteAllPresents endpoint)
+├── Input: Authenticated request
+├── Processing: DELETE FROM present_attributes
+└── Output: Deletion count and processing time
 
 Step 1: Raw Request Processing (for /predict endpoint)
 ├── Input: {branch_no, gifts[{present_name, present_vendor, model_name, model_no}], employees[{name}]}
@@ -207,6 +238,8 @@ Historical Data → Preprocessor → Feature Engineering → Model Training
                               ↘                    ↗
 API Request (/predict) → Classifier → Feature Extraction → Prediction
 API Request (/addPresent) → Add to `present_attributes` (for future classification/lookup)
+API Request (/addPresentsProcessed) → Bulk CSV Import (OPTIMIZED: 500x faster)
+API Request (/deleteAllPresents) → Clear all data (for testing)
 ```
 
 ### Service Integration

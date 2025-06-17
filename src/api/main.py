@@ -1,16 +1,19 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File
 from fastapi.security import APIKeyHeader
 from typing import Dict
 import hashlib
+import time
 
-from src.api.schemas.requests import AddPresentRequest
-from src.database.users import authenticate_user
-from src.database import db_factory
+from .schemas.requests import AddPresentRequest
+from .schemas.responses import CSVImportResponse, CSVImportSummary, DeleteAllPresentsResponse
+from ..database.users import authenticate_user
+from ..database import db_factory
+from ..database.csv_import import import_presents_from_csv
 import logging
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from src.scheduler.tasks import fetch_pending_present_attributes
-from src.config.settings import settings
+from ..scheduler.tasks import fetch_pending_present_attributes
+from ..config.settings import settings
 
 # Configure logging
 # Ensure settings.LOG_LEVEL is defined in your src.config.settings
@@ -141,4 +144,128 @@ async def add_present(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to add present to database: {str(e)}"
+        )
+
+
+@app.post("/addPresentsProcessed", response_model=CSVImportResponse, status_code=status.HTTP_201_CREATED)
+async def add_presents_processed(
+    file: UploadFile = File(..., description="CSV file containing pre-classified present attributes"),
+    current_user: Dict = Depends(get_current_user)
+):
+    """
+    Import pre-classified present attributes from a CSV file.
+    
+    This endpoint allows bulk import of present attributes that have already been
+    classified through external processes. The CSV must contain all required columns
+    including classifications.
+    
+    Required CSV columns:
+    - present_hash, present_name, present_vendor, model_name, model_no
+    - item_main_category, item_sub_category, color, brand, vendor
+    - target_demographic, utility_type, durability, usage_type
+    """
+    start_time = time.time()
+    
+    # Validate file type
+    if not file.filename or not file.filename.lower().endswith('.csv'):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File must be a CSV file"
+        )
+    
+    # Read file content
+    try:
+        content = await file.read()
+        csv_content = content.decode('utf-8')
+    except UnicodeDecodeError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File must be UTF-8 encoded"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Error reading file: {str(e)}"
+        )
+    
+    if not csv_content.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="CSV file is empty"
+        )
+    
+    # Import presents
+    try:
+        result = import_presents_from_csv(csv_content)
+        
+        processing_time_ms = (time.time() - start_time) * 1000
+        
+        # Create summary
+        summary = CSVImportSummary(
+            imported_count=result['imported_count'],
+            skipped_count=result['skipped_count'],
+            error_count=result['error_count'],
+            total_processed=result['total_processed']
+        )
+        
+        # Determine success message
+        if result['error_count'] == 0:
+            message = "CSV import completed successfully"
+        elif result['imported_count'] > 0:
+            message = f"CSV import completed with {result['error_count']} errors"
+        else:
+            message = "CSV import failed - no presents were imported"
+        
+        return CSVImportResponse(
+            message=message,
+            summary=summary,
+            processing_time_ms=processing_time_ms
+        )
+        
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal server error during import: {str(e)}"
+        )
+
+
+@app.post("/deleteAllPresents", response_model=DeleteAllPresentsResponse, status_code=status.HTTP_200_OK)
+async def delete_all_presents(
+    current_user: Dict = Depends(get_current_user)
+):
+    """
+    Delete all presents from the present_attributes table.
+    
+    ⚠️ WARNING: This endpoint will permanently delete ALL present data!
+    This is intended for testing purposes only.
+    """
+    start_time = time.time()
+    
+    try:
+        # Get count before deletion for response
+        count_query = "SELECT COUNT(*) as count FROM present_attributes"
+        count_result = db_factory.execute_query(count_query)
+        total_count = count_result[0]['count'] if count_result else 0
+        
+        # Delete all presents
+        delete_query = "DELETE FROM present_attributes"
+        deleted_count = db_factory.execute_write(delete_query)
+        
+        processing_time_ms = (time.time() - start_time) * 1000
+        
+        return DeleteAllPresentsResponse(
+            message=f"All presents deleted successfully. Removed {deleted_count} records.",
+            deleted_count=deleted_count,
+            processing_time_ms=processing_time_ms
+        )
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error deleting presents: {str(e)}"
         )

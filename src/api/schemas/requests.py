@@ -162,3 +162,16 @@ class BatchPredictionRequest(BaseModel):
                 ]
             }
         }
+
+
+class CSVUploadRequest(BaseModel):
+    """Model for CSV file upload metadata (if needed for future enhancements)."""
+    
+    description: str = Field(default="", description="Optional description of the CSV import")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "description": "Bulk import of pre-classified present attributes"
+            }
+        }
