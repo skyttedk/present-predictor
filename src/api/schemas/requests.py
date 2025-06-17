@@ -226,9 +226,9 @@ class PredictPresent(BaseModel):
     """Present item for prediction request."""
     id: int = Field(..., description="Present ID")
     description: str = Field(..., description="Present description (name)", min_length=1)
-    model_name: str = Field(..., description="Model name", min_length=1)
-    model_no: str = Field(..., description="Model number")
-    vendor: str = Field(..., description="Vendor name", min_length=1)
+    model_name: str = Field("", description="Model name (can be blank)")
+    model_no: str = Field("", description="Model number (can be blank)")
+    vendor: str = Field("", description="Vendor name (can be blank)")
     
     @validator('*', pre=True)
     def strip_strings(cls, v):
@@ -236,7 +236,7 @@ class PredictPresent(BaseModel):
             return v.strip()
         return v
 
-    @field_validator('description', 'model_name', 'vendor', mode='before')
+    @field_validator('description', mode='before')
     def validate_required_fields(cls, v, info):
         if isinstance(v, str) and not v.strip():
             raise ValueError(f"{info.field_name} cannot be empty")

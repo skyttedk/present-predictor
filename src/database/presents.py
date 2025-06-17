@@ -9,20 +9,27 @@ from . import db_factory
 
 logger = logging.getLogger(__name__)
 
-def get_present_hash(present_name: str, model_name: str, model_no: str) -> str:
+def get_present_hash(present_name: str, model_name: str, model_no: str, vendor: str = "") -> str:
     """
-    Generate hash for present details.
+    Generate hash for present details using the same logic as API endpoints.
 
     Args:
         present_name: Present name text
         model_name: Model name text
         model_no: Model number text
+        vendor: Vendor name (optional)
 
     Returns:
         MD5 hash of the combined present details
     """
-    combined_details = f"{present_name}_{model_name}_{model_no}".lower().strip()
-    return hashlib.md5(combined_details.encode()).hexdigest()
+    # Use same logic as /addPresent and /predict endpoints
+    use_vendor = bool(vendor and vendor.lower() != 'gavefabrikken')
+    if use_vendor:
+        text_to_hash = f"{present_name} - {model_name} - {model_no}. Vendor {vendor}"
+    else:
+        text_to_hash = f"{present_name} - {model_name} - {model_no}."
+    
+    return hashlib.md5(text_to_hash.encode('utf-8')).hexdigest()
 
 def get_cached_present_classification(
     present_name: str,
@@ -83,7 +90,7 @@ def cache_present_classification(
     Returns:
         ID of the cached entry
     """
-    present_hash = get_present_hash(present_name, model_name, model_no)
+    present_hash = get_present_hash(present_name, model_name, model_no, present_vendor or "")
 
     query = """
         INSERT INTO present_attributes
@@ -187,7 +194,7 @@ def batch_cache_present_classifications(
 
     params_list = []
     for item in classifications:
-        present_hash = get_present_hash(item['present_name'], item['model_name'], item['model_no'])
+        present_hash = get_present_hash(item['present_name'], item['model_name'], item['model_no'], item.get('present_vendor', ''))
         params = (
             present_hash,
             item['present_name'],
