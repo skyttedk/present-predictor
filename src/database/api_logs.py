@@ -207,3 +207,69 @@ def cleanup_old_logs(days: int = 90) -> int:
     logger.info(f"Cleaned up {deleted} old API log entries")
 
     return deleted
+
+def get_recent_logs(limit: int = 10) -> List[Dict[str, Any]]:
+    """
+    Get recent API log entries.
+
+    Args:
+        limit: Maximum number of log entries to return (default: 10)
+
+    Returns:
+        List of recent log entries with user information
+    """
+    query = """
+        SELECT
+            l.id,
+            l.date_time,
+            u.username,
+            l.api_route,
+            l.response_status_code,
+            l.response_time_ms,
+            l.error_message,
+            l.request_payload,
+            l.response_payload
+        FROM user_api_call_log l
+        JOIN "user" u ON l.user_id = u.id
+        ORDER BY l.date_time DESC
+        LIMIT %s
+    """
+
+    logs = db_factory.execute_query(query, (limit,))
+
+    # Parse JSON payloads and truncate if too large
+    for log in logs:
+        try:
+            if log['request_payload']:
+                payload = json.loads(log['request_payload'])
+                # Truncate large payloads
+                payload_str = json.dumps(payload)
+                if len(payload_str) > 500:
+                    log['request_payload'] = json.loads(payload_str[:500] + '...')
+                else:
+                    log['request_payload'] = payload
+            else:
+                log['request_payload'] = None
+        except (json.JSONDecodeError, TypeError):
+            logger.warning(f"Could not parse request_payload for log ID {log['id']}")
+            log['request_payload'] = None
+
+        try:
+            if log['response_payload']:
+                payload = json.loads(log['response_payload'])
+                # Truncate large payloads
+                payload_str = json.dumps(payload)
+                if len(payload_str) > 500:
+                    log['response_payload'] = json.loads(payload_str[:500] + '...')
+                else:
+                    log['response_payload'] = payload
+            else:
+                log['response_payload'] = None
+        except (json.JSONDecodeError, TypeError):
+            logger.warning(f"Could not parse response_payload for log ID {log['id']}")
+            log['response_payload'] = None
+
+        # Convert timestamp to string for API response
+        log['date_time'] = str(log['date_time'])
+
+    return logs

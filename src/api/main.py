@@ -5,8 +5,9 @@ import hashlib
 import time
 
 from .schemas.requests import AddPresentRequest, CreateUserRequest, DeleteUserRequest
-from .schemas.responses import CSVImportResponse, CSVImportSummary, DeleteAllPresentsResponse, CountPresentsResponse, PresentCountByStatus, CreateUserResponse, ListUsersResponse, DeleteUserResponse, UserInfo
+from .schemas.responses import CSVImportResponse, CSVImportSummary, DeleteAllPresentsResponse, CountPresentsResponse, PresentCountByStatus, CreateUserResponse, ListUsersResponse, DeleteUserResponse, UserInfo, TailLogsResponse, ApiLogEntry
 from ..database.users import authenticate_user, is_admin_user, create_user, list_users, delete_user, count_users
+from ..database.api_logs import get_recent_logs
 from ..database import db_factory
 from ..database.csv_import import import_presents_from_csv
 import logging
@@ -503,4 +504,67 @@ async def delete_user_endpoint(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error deleting user: {str(e)}"
+        )
+
+
+@app.get("/logs/tail", response_model=TailLogsResponse, status_code=status.HTTP_200_OK)
+async def get_tail_logs(
+    limit: int = 10,
+    admin_user: Dict = Depends(get_admin_user)
+):
+    """
+    Get recent API log entries (tail logs).
+    
+    Requires admin authentication.
+    Returns the most recent log entries from the API call log.
+    
+    Args:
+        limit: Number of log entries to return (default: 10, max: 100)
+    """
+    # Validate limit parameter
+    if limit < 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Limit must be at least 1"
+        )
+    if limit > 100:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Limit cannot exceed 100"
+        )
+    
+    start_time = time.time()
+    
+    try:
+        logs_data = get_recent_logs(limit=limit)
+        
+        # Convert to ApiLogEntry format
+        logs = []
+        for log_data in logs_data:
+            log_entry = ApiLogEntry(
+                id=log_data["id"],
+                date_time=log_data["date_time"],
+                username=log_data["username"],
+                api_route=log_data["api_route"],
+                response_status_code=log_data["response_status_code"],
+                response_time_ms=log_data["response_time_ms"],
+                error_message=log_data["error_message"],
+                request_payload=log_data["request_payload"],
+                response_payload=log_data["response_payload"]
+            )
+            logs.append(log_entry)
+        
+        processing_time_ms = (time.time() - start_time) * 1000
+        
+        return TailLogsResponse(
+            message="Recent logs retrieved successfully",
+            logs=logs,
+            total_count=len(logs),
+            processing_time_ms=processing_time_ms
+        )
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving logs: {str(e)}"
         )

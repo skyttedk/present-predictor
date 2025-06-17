@@ -381,6 +381,64 @@ class ListUsersResponse(BaseModel):
         }
 
 
+class ApiLogEntry(BaseModel):
+    """Model for API log entry."""
+    id: int = Field(..., description="Log entry ID")
+    date_time: str = Field(..., description="Log entry timestamp")
+    username: str = Field(..., description="Username who made the request")
+    api_route: str = Field(..., description="API endpoint route")
+    response_status_code: int = Field(..., description="HTTP response status code")
+    response_time_ms: float = Field(..., description="Response time in milliseconds")
+    error_message: Optional[str] = Field(None, description="Error message if any")
+    request_payload: Optional[Dict[str, Any]] = Field(None, description="Request payload (truncated if large)")
+    response_payload: Optional[Dict[str, Any]] = Field(None, description="Response payload (truncated if large)")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "id": 123,
+                "date_time": "2025-06-17T10:30:00Z",
+                "username": "john_doe",
+                "api_route": "/test",
+                "response_status_code": 200,
+                "response_time_ms": 45.2,
+                "error_message": None,
+                "request_payload": None,
+                "response_payload": {"message": "Test endpoint is working!"}
+            }
+        }
+
+
+class TailLogsResponse(BaseModel):
+    """Response model for tail logs endpoint."""
+    message: str = Field(..., description="Success message")
+    logs: List[ApiLogEntry] = Field(..., description="List of recent log entries")
+    total_count: int = Field(..., description="Number of log entries returned")
+    processing_time_ms: float = Field(..., description="Processing time in milliseconds")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "message": "Recent logs retrieved successfully",
+                "total_count": 10,
+                "logs": [
+                    {
+                        "id": 123,
+                        "date_time": "2025-06-17T10:30:00Z",
+                        "username": "john_doe",
+                        "api_route": "/test",
+                        "response_status_code": 200,
+                        "response_time_ms": 45.2,
+                        "error_message": None,
+                        "request_payload": None,
+                        "response_payload": {"message": "Test endpoint is working!"}
+                    }
+                ],
+                "processing_time_ms": 12.5
+            }
+        }
+
+
 class DeleteUserResponse(BaseModel):
     """Response model for user deletion."""
     message: str = Field(..., description="Success message")
