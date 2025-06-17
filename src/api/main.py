@@ -90,25 +90,20 @@ async def get_admin_user(api_key: str = Depends(api_key_header)) -> Dict:
     """
     Dependency to authenticate admin user via API key.
     """
+    # Check if no users exist yet (special case for first user creation)
+    user_count = count_users()
+    if user_count == 0:
+        # Allow creation of first user without any API key authentication
+        # Return a dummy user object for first user creation
+        return {"id": 0, "username": "system", "is_admin": True}
+    
+    # Normal authentication required when users exist
     if not api_key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated: API key is missing",
             headers={"WWW-Authenticate": "Header"},
         )
-    
-    # Check if no users exist yet (special case for first user creation)
-    user_count = count_users()
-    if user_count == 0:
-        # Allow creation of first user without admin check
-        user = authenticate_user(api_key)
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid API Key",
-                headers={"WWW-Authenticate": "Header"},
-            )
-        return user
     
     # Normal admin check for existing users
     if not is_admin_user(api_key):
