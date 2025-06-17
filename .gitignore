@@ -188,6 +188,7 @@ secrets.json
 *.h5
 *.hdf5
 
+reference-material/
 data/raw/
 data/processed/
 *.csv
