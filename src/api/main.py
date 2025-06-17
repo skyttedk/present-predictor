@@ -27,9 +27,21 @@ scheduler = AsyncIOScheduler()
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI): # Renamed app to app_instance to avoid conflict
     # Startup
-    logger.info("Application startup: Initializing database...")
-    db_factory.init_database()
-    logger.info("Application startup: Database initialized.")
+    logger.info("Application startup: Checking database...")
+    try:
+        # Check if tables exist before initializing
+        check_query = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'present_attributes'"
+        result = db_factory.execute_query(check_query)
+        
+        if not result:
+            logger.info("Database tables not found. Initializing database...")
+            db_factory.init_database()
+            logger.info("Application startup: Database initialized.")
+        else:
+            logger.info("Database tables already exist. Skipping initialization.")
+    except Exception as e:
+        logger.error(f"Database check/initialization failed: {e}")
+        # Continue anyway - database might be accessible but check failed
     
     logger.info("Application startup: Starting scheduler...")
     scheduler.add_job(fetch_pending_present_attributes, "interval", minutes=2, id="fetch_attributes_job")
