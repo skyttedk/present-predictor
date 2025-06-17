@@ -381,3 +381,39 @@ def invalidate_present_cache(present_name: str, model_name: str, model_no: str) 
         return True
     logger.info(f"No active cache entry found to invalidate for present_hash: {present_hash}")
     return False
+
+
+def get_present_by_hash(present_hash: str) -> Optional[Dict[str, Any]]:
+    """
+    Get present attributes by hash, only if successfully classified.
+    
+    Args:
+        present_hash: MD5 hash of present details
+        
+    Returns:
+        Present attributes dict or None if not found/not classified
+    """
+    query = """
+        SELECT
+            item_main_category,
+            item_sub_category,
+            color,
+            brand,
+            vendor,
+            target_demographic,
+            utility_type,
+            usage_type,
+            durability
+        FROM present_attributes
+        WHERE present_hash = %s
+        AND classification_status = 'success'
+        LIMIT 1
+    """
+    
+    results = db_factory.execute_query(query, (present_hash,))
+    if results:
+        logger.debug(f"Found classified present for hash: {present_hash}")
+        return results[0]
+    
+    logger.debug(f"No classified present found for hash: {present_hash}")
+    return None

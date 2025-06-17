@@ -451,3 +451,101 @@ class DeleteUserResponse(BaseModel):
                 "username": "john_doe"
             }
         }
+
+
+class TransformedPresent(BaseModel):
+    """Transformed present with classification attributes."""
+    id: int = Field(..., description="Present ID from request")
+    item_main_category: str = Field(..., description="Main product category")
+    item_sub_category: str = Field(..., description="Product subcategory")
+    color: str = Field(..., description="Product color")
+    brand: str = Field(..., description="Product brand")
+    vendor: str = Field(..., description="Product vendor")
+    target_demographic: str = Field(..., description="Target demographic (male/female/unisex)")
+    utility_type: str = Field(..., description="Utility type (practical/aesthetic/etc)")
+    usage_type: str = Field(..., description="Usage type (individual/shareable)")
+    durability: str = Field(..., description="Durability (durable/consumable)")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "id": 147748,
+                "item_main_category": "Travel",
+                "item_sub_category": "Luggage",
+                "color": "white",
+                "brand": "Cavalluzzi",
+                "vendor": "TravelGear",
+                "target_demographic": "unisex",
+                "utility_type": "practical",
+                "usage_type": "individual",
+                "durability": "durable"
+            }
+        }
+
+
+class TransformedEmployee(BaseModel):
+    """Transformed employee with gender classification."""
+    gender: str = Field(..., description="Classified gender (male/female/unisex)")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "gender": "female"
+            }
+        }
+
+
+class TransformedPredictResponse(BaseModel):
+    """Response model for /predict endpoint transformation."""
+    branch: str = Field(..., description="Industry code from CVR lookup")
+    presents: List[TransformedPresent] = Field(..., description="Transformed presents with attributes")
+    employees: List[TransformedEmployee] = Field(..., description="Transformed employees with gender")
+
+    @validator('presents')
+    def validate_presents(cls, v):
+        if not v:
+            raise ValueError("At least one present must be provided")
+        return v
+
+    @validator('employees')
+    def validate_employees(cls, v):
+        if not v:
+            raise ValueError("At least one employee must be provided")
+        return v
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "branch": "621000",
+                "presents": [
+                    {
+                        "id": 147748,
+                        "item_main_category": "Travel",
+                        "item_sub_category": "Luggage",
+                        "color": "white",
+                        "brand": "Cavalluzzi",
+                        "vendor": "TravelGear",
+                        "target_demographic": "unisex",
+                        "utility_type": "practical",
+                        "usage_type": "individual",
+                        "durability": "durable"
+                    },
+                    {
+                        "id": 147757,
+                        "item_main_category": "Bags",
+                        "item_sub_category": "Backpack",
+                        "color": "black",
+                        "brand": "Bjørn Borg",
+                        "vendor": "Bjørn Borg",
+                        "target_demographic": "unisex",
+                        "utility_type": "practical",
+                        "usage_type": "individual",
+                        "durability": "durable"
+                    }
+                ],
+                "employees": [
+                    {"gender": "female"},
+                    {"gender": "male"}
+                ]
+            }
+        }

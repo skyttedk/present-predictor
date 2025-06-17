@@ -220,3 +220,114 @@ class DeleteUserRequest(BaseModel):
                 "username": "john_doe"
             }
         }
+
+
+class PredictPresent(BaseModel):
+    """Present item for prediction request."""
+    id: int = Field(..., description="Present ID")
+    description: str = Field(..., description="Present description (name)", min_length=1)
+    model_name: str = Field(..., description="Model name", min_length=1)
+    model_no: str = Field(..., description="Model number")
+    vendor: str = Field(..., description="Vendor name", min_length=1)
+    
+    @validator('*', pre=True)
+    def strip_strings(cls, v):
+        if isinstance(v, str):
+            return v.strip()
+        return v
+
+    @field_validator('description', 'model_name', 'vendor', mode='before')
+    def validate_required_fields(cls, v, info):
+        if isinstance(v, str) and not v.strip():
+            raise ValueError(f"{info.field_name} cannot be empty")
+        return v
+
+    class Config:
+        protected_namespaces = ()
+        json_schema_extra = {
+            "example": {
+                "id": 147748,
+                "description": "Cavalluzzi kabine trolley, hvid",
+                "model_name": "Cavalluzzi kabine trolley, hvid",
+                "model_no": "",
+                "vendor": "TravelGear"
+            }
+        }
+
+
+class PredictEmployee(BaseModel):
+    """Employee for prediction request."""
+    name: str = Field(..., description="Employee name", min_length=1)
+    
+    @validator('name')
+    def validate_name(cls, v):
+        if not v.strip():
+            raise ValueError("Employee name cannot be empty")
+        return v.strip()
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "name": "GUNHILD SØRENSEN"
+            }
+        }
+
+
+class PredictRequest(BaseModel):
+    """Request model for /predict endpoint."""
+    cvr: str = Field(..., description="Danish CVR number", min_length=8, max_length=8)
+    presents: List[PredictPresent] = Field(..., description="List of presents", min_items=1)
+    employees: List[PredictEmployee] = Field(..., description="List of employees", min_items=1)
+    
+    @validator('cvr')
+    def validate_cvr(cls, v):
+        # Basic CVR validation (8 digits)
+        v = v.strip()
+        if not v.isdigit() or len(v) != 8:
+            raise ValueError("CVR must be exactly 8 digits")
+        return v
+
+    @validator('presents')
+    def validate_presents(cls, v):
+        if not v:
+            raise ValueError("At least one present must be provided")
+        
+        # Check for duplicate present IDs
+        present_ids = [present.id for present in v]
+        if len(present_ids) != len(set(present_ids)):
+            raise ValueError("Duplicate present IDs are not allowed")
+        
+        return v
+
+    @validator('employees')
+    def validate_employees(cls, v):
+        if not v:
+            raise ValueError("At least one employee must be provided")
+        return v
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "cvr": "12345678",
+                "presents": [
+                    {
+                        "id": 147748,
+                        "description": "Cavalluzzi kabine trolley, hvid",
+                        "model_name": "Cavalluzzi kabine trolley, hvid",
+                        "model_no": "",
+                        "vendor": "TravelGear"
+                    },
+                    {
+                        "id": 147757,
+                        "description": "Bjørn Borg ryggsekk",
+                        "model_name": "Bjørn Borg ryggsekk",
+                        "model_no": "",
+                        "vendor": "Bjørn Borg"
+                    }
+                ],
+                "employees": [
+                    {"name": "GUNHILD SØRENSEN"},
+                    {"name": "Per Christian Eidevik"}
+                ]
+            }
+        }

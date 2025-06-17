@@ -1,0 +1,27 @@
+{
+  "cvr": "912567508",
+  "presents": [
+    {
+      "id": 147748,
+      "description": "Cavalluzzi kabine trolley, hvid",
+      "model_name": "Cavalluzzi kabine trolley, hvid",
+      "model_no": "",
+      "vendor": "TravelGear"
+    },
+    {
+      "id": 147757,
+      "description": "Bjørn Borg ryggsekk",
+      "model_name": "Bjørn Borg ryggsekk",
+      "model_no": "",
+      "vendor": "Bjørn Borg"
+    }
+  ],
+  "employees": [
+    {
+      "name": "GUNHILD SØRENSEN"
+    },
+    {
+      "name": "Per Christian Eidevik"
+    }
+  ]
+}

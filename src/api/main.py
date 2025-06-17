@@ -4,8 +4,11 @@ from typing import Dict
 import hashlib
 import time
 
-from .schemas.requests import AddPresentRequest, CreateUserRequest, DeleteUserRequest
-from .schemas.responses import CSVImportResponse, CSVImportSummary, DeleteAllPresentsResponse, CountPresentsResponse, PresentCountByStatus, CreateUserResponse, ListUsersResponse, DeleteUserResponse, UserInfo, TailLogsResponse, ApiLogEntry
+from .schemas.requests import AddPresentRequest, CreateUserRequest, DeleteUserRequest, PredictRequest
+from .schemas.responses import CSVImportResponse, CSVImportSummary, DeleteAllPresentsResponse, CountPresentsResponse, PresentCountByStatus, CreateUserResponse, ListUsersResponse, DeleteUserResponse, UserInfo, TailLogsResponse, ApiLogEntry, TransformedPredictResponse, TransformedPresent, TransformedEmployee
+from ..data.cvr_client import fetch_industry_code
+from ..data.gender_classifier import classify_employee_gender
+from ..database.presents import get_present_by_hash
 from ..database.users import authenticate_user, is_admin_user, create_user, list_users, delete_user, count_users
 from ..database.api_logs import get_recent_logs
 from ..database import db_factory
@@ -121,6 +124,93 @@ async def test_endpoint(current_user: Dict = Depends(get_current_user)):
     A simple test endpoint, protected by API key.
     """
     return {"message": f"Test endpoint is working! Hello {current_user.get('username')}!"}
+
+
+@app.post("/predict", response_model=TransformedPredictResponse)
+async def predict_endpoint(
+    request_data: PredictRequest,
+    current_user: Dict = Depends(get_current_user)
+):
+    """
+    Transform input data for prediction.
+    
+    This endpoint:
+    1. Fetches industry code from CVR API
+    2. Looks up present classifications from database
+    3. Classifies employee genders
+    4. Returns transformed data (no ML predictions yet)
+    """
+    
+    # Step 1: Fetch industry code from CVR API
+    branch = await fetch_industry_code(request_data.cvr)
+    if not branch:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Could not fetch industry code for CVR: {request_data.cvr}"
+        )
+    
+    # Step 2: Transform presents
+    transformed_presents = []
+    missing_presents = []
+    
+    for present in request_data.presents:
+        # Calculate hash using the same logic as /addPresent
+        use_vendor = bool(present.vendor and present.vendor.lower() != 'gavefabrikken')
+        if use_vendor:
+            text_to_hash = f"{present.description} - {present.model_name} - {present.model_no}. Vendor {present.vendor}"
+        else:
+            text_to_hash = f"{present.description} - {present.model_name} - {present.model_no}."
+        
+        present_hash = hashlib.md5(text_to_hash.encode('utf-8')).hexdigest()
+        
+        # Lookup in database
+        attributes = get_present_by_hash(present_hash)
+        
+        if not attributes:
+            missing_presents.append({
+                "id": present.id,
+                "description": present.description,
+                "hash": present_hash
+            })
+            continue
+        
+        transformed_presents.append(TransformedPresent(
+            id=present.id,
+            item_main_category=attributes.get('item_main_category', ''),
+            item_sub_category=attributes.get('item_sub_category', ''),
+            color=attributes.get('color', ''),
+            brand=attributes.get('brand', ''),
+            vendor=attributes.get('vendor', ''),
+            target_demographic=attributes.get('target_demographic', ''),
+            utility_type=attributes.get('utility_type', ''),
+            usage_type=attributes.get('usage_type', ''),
+            durability=attributes.get('durability', '')
+        ))
+    
+    # Check if any presents were not found
+    if missing_presents:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Some presents not found in database. Please classify them first using /addPresent endpoint.",
+                "missing_presents": missing_presents
+            }
+        )
+    
+    # Step 3: Transform employees
+    transformed_employees = []
+    for employee in request_data.employees:
+        gender = classify_employee_gender(employee.name)
+        transformed_employees.append(TransformedEmployee(
+            gender=gender.value  # Convert enum to string
+        ))
+    
+    return TransformedPredictResponse(
+        branch=branch,
+        presents=transformed_presents,
+        employees=transformed_employees
+    )
+
 
 @app.post("/addPresent", status_code=status.HTTP_201_CREATED)
 async def add_present(
