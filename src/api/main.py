@@ -5,7 +5,7 @@ import hashlib
 import time
 
 from .schemas.requests import AddPresentRequest, CreateUserRequest, DeleteUserRequest, PredictRequest
-from .schemas.responses import CSVImportResponse, CSVImportSummary, DeleteAllPresentsResponse, CountPresentsResponse, PresentCountByStatus, CreateUserResponse, ListUsersResponse, DeleteUserResponse, UserInfo, TailLogsResponse, ApiLogEntry, TransformedPredictResponse, TransformedPresent, TransformedEmployee
+from .schemas.responses import CSVImportResponse, CSVImportSummary, DeleteAllPresentsResponse, CountPresentsResponse, PresentCountByStatus, CreateUserResponse, ListUsersResponse, DeleteUserResponse, UserInfo, TailLogsResponse, ApiLogEntry, TransformedPredictResponse, TransformedPresent, TransformedEmployee, PredictionResponse
 from ..data.cvr_client import fetch_industry_code
 from ..data.gender_classifier import classify_employee_gender
 from ..database.presents import get_present_by_hash
@@ -18,6 +18,7 @@ from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from ..scheduler.tasks import fetch_pending_present_attributes
 from ..config.settings import settings
+from ..ml.predictor import get_predictor
 
 # Configure logging
 # Ensure settings.LOG_LEVEL is defined in your src.config.settings
@@ -126,20 +127,22 @@ async def test_endpoint(current_user: Dict = Depends(get_current_user)):
     return {"message": f"Test endpoint is working! Hello {current_user.get('username')}!"}
 
 
-@app.post("/predict", response_model=TransformedPredictResponse)
+@app.post("/predict", response_model=PredictionResponse)
 async def predict_endpoint(
     request_data: PredictRequest,
     current_user: Dict = Depends(get_current_user)
 ):
     """
-    Transform input data for prediction.
+    Transform input data and predict gift demand quantities.
     
     This endpoint:
     1. Fetches industry code from CVR API
     2. Looks up present classifications from database
     3. Classifies employee genders
-    4. Returns transformed data (no ML predictions yet)
+    4. Makes ML predictions for expected quantities
     """
+    
+    start_time = time.time()
     
     # Step 1: Fetch industry code from CVR API
     branch = await fetch_industry_code(request_data.cvr)
@@ -174,18 +177,20 @@ async def predict_endpoint(
             })
             continue
         
-        transformed_presents.append(TransformedPresent(
-            id=present.id,
-            item_main_category=attributes.get('item_main_category', ''),
-            item_sub_category=attributes.get('item_sub_category', ''),
-            color=attributes.get('color', ''),
-            brand=attributes.get('brand', ''),
-            vendor=attributes.get('vendor', ''),
-            target_demographic=attributes.get('target_demographic', ''),
-            utility_type=attributes.get('utility_type', ''),
-            usage_type=attributes.get('usage_type', ''),
-            durability=attributes.get('durability', '')
-        ))
+        # Convert to dictionary format for ML predictor
+        present_dict = {
+            'id': present.id,
+            'item_main_category': attributes.get('item_main_category', ''),
+            'item_sub_category': attributes.get('item_sub_category', ''),
+            'color': attributes.get('color', ''),
+            'brand': attributes.get('brand', ''),
+            'vendor': attributes.get('vendor', ''),
+            'target_demographic': attributes.get('target_demographic', ''),
+            'utility_type': attributes.get('utility_type', ''),
+            'usage_type': attributes.get('usage_type', ''),
+            'durability': attributes.get('durability', '')
+        }
+        transformed_presents.append(present_dict)
     
     # Check if any presents were not found
     if missing_presents:
@@ -201,15 +206,43 @@ async def predict_endpoint(
     transformed_employees = []
     for employee in request_data.employees:
         gender = classify_employee_gender(employee.name)
-        transformed_employees.append(TransformedEmployee(
-            gender=gender.value  # Convert enum to string
-        ))
+        transformed_employees.append({
+            'gender': gender.value  # Convert enum to string
+        })
     
-    return TransformedPredictResponse(
-        branch=branch,
-        presents=transformed_presents,
-        employees=transformed_employees
-    )
+    # Step 4: ML Predictions (NEW)
+    try:
+        logger.info(f"Making ML predictions for {len(transformed_presents)} presents and {len(transformed_employees)} employees")
+        
+        # Get predictor instance
+        predictor = get_predictor()
+        
+        # Make predictions
+        predictions = predictor.predict(
+            branch=branch,
+            presents=transformed_presents,
+            employees=transformed_employees
+        )
+        
+        # Calculate processing time
+        processing_time_ms = (time.time() - start_time) * 1000
+        
+        logger.info(f"Predictions completed in {processing_time_ms:.2f}ms")
+        
+        # Step 5: Return predictions
+        return PredictionResponse(
+            branch_no=request_data.cvr,
+            predictions=predictions,
+            total_employees=len(request_data.employees),
+            processing_time_ms=processing_time_ms
+        )
+        
+    except Exception as e:
+        logger.error(f"ML prediction failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Prediction service failed: {str(e)}"
+        )
 
 
 @app.post("/addPresent", status_code=status.HTTP_201_CREATED)
