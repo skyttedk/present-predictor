@@ -87,13 +87,45 @@ class EnhancedGenderClassifier:
             return ' '.join([part.capitalize() for part in parts if part])
         
         return name.capitalize()
+
+    def extract_first_name(self, full_name: str) -> str:
+        """
+        Extract just the first name from a full name string.
+        This is critical because gender-guesser works best with first names only.
+        
+        Examples:
+        - "GUNHILD SØRENSEN" -> "Gunhild"
+        - "Per Christian Eidevik" -> "Per"
+        - "Anne-Marie Hansen" -> "Anne-Marie"
+        """
+        if not full_name:
+            return full_name
+        
+        # Normalize first
+        normalized = self.normalize_name(full_name)
+        
+        # Split on spaces and take the first part
+        # This handles "First Last" -> "First"
+        parts = normalized.split()
+        if not parts:
+            return normalized
+        
+        first_part = parts[0]
+        
+        # Handle hyphenated first names like "Anne-Marie Hansen"
+        # If the first part contains a hyphen, it's likely a compound first name
+        if '-' in first_part:
+            return first_part  # Keep the whole hyphenated name
+        
+        return first_part
     
     def classify_gender(self, name: str) -> GenderClassificationResult:
         """
         Enhanced gender detection with Danish name support and case handling.
+        CRITICAL: Extracts first name only as gender-guesser works best with first names.
         
         Args:
-            name: The name to classify
+            name: The full name to classify (e.g., "GUNHILD SØRENSEN")
             
         Returns:
             GenderClassificationResult: Classification result with confidence and method
@@ -107,18 +139,19 @@ class EnhancedGenderClassifier:
                 method="fallback"
             )
         
-        # Normalize the name
-        normalized_name = self.normalize_name(name)
-        original_lower = name.lower().strip()
+        # CRITICAL: Extract first name only for classification
+        first_name = self.extract_first_name(name)
+        normalized_name = self.normalize_name(first_name)
+        original_lower = first_name.lower().strip()
         
-        # Method 1: Try the standard detector first with normalized name
+        # Method 1: Try the standard detector first with first name only
         if self.detector:
             try:
                 result = self.detector.get_gender(normalized_name)
                 if result in ['male', 'female']:
                     return GenderClassificationResult(
-                        name=name,
-                        normalized_name=normalized_name,
+                        name=name,  # Keep original full name
+                        normalized_name=normalized_name,  # Show extracted first name
                         gender=TargetDemographic(result),
                         confidence="high",
                         method="gender_guesser"
@@ -126,12 +159,12 @@ class EnhancedGenderClassifier:
             except Exception as e:
                 logger.debug(f"Gender guesser failed for '{normalized_name}': {e}")
         
-        # Method 2: Check our Danish names dictionary
+        # Method 2: Check our Danish names dictionary (with first name only)
         if original_lower in self.DANISH_NAMES:
             gender_result = self.DANISH_NAMES[original_lower]
             return GenderClassificationResult(
-                name=name,
-                normalized_name=normalized_name,
+                name=name,  # Keep original full name
+                normalized_name=normalized_name,  # Show extracted first name
                 gender=TargetDemographic(gender_result),
                 confidence="high",
                 method="danish_dict"
@@ -143,8 +176,8 @@ class EnhancedGenderClassifier:
                 result = self.detector.get_gender(normalized_name, 'denmark')
                 if result in ['male', 'female']:
                     return GenderClassificationResult(
-                        name=name,
-                        normalized_name=normalized_name,
+                        name=name,  # Keep original full name
+                        normalized_name=normalized_name,  # Show extracted first name
                         gender=TargetDemographic(result),
                         confidence="medium",
                         method="gender_guesser"
@@ -158,16 +191,16 @@ class EnhancedGenderClassifier:
                 result = self.detector.get_gender(normalized_name)
                 if result in ['mostly_male', 'andy']:  # Andy means androgynous but lean male
                     return GenderClassificationResult(
-                        name=name,
-                        normalized_name=normalized_name,
+                        name=name,  # Keep original full name
+                        normalized_name=normalized_name,  # Show extracted first name
                         gender=TargetDemographic.MALE,
                         confidence="low",
                         method="gender_guesser"
                     )
                 elif result in ['mostly_female']:
                     return GenderClassificationResult(
-                        name=name,
-                        normalized_name=normalized_name,
+                        name=name,  # Keep original full name
+                        normalized_name=normalized_name,  # Show extracted first name
                         gender=TargetDemographic.FEMALE,
                         confidence="low",
                         method="gender_guesser"
@@ -177,8 +210,8 @@ class EnhancedGenderClassifier:
         
         # Ultimate fallback
         return GenderClassificationResult(
-            name=name,
-            normalized_name=normalized_name,
+            name=name,  # Keep original full name
+            normalized_name=normalized_name,  # Show extracted first name
             gender=TargetDemographic.UNISEX,
             confidence="low",
             method="fallback"
