@@ -265,3 +265,39 @@ class DeleteAllPresentsResponse(BaseModel):
                 "timestamp": "2025-06-17T09:31:00Z"
             }
         }
+class PresentCountByStatus(BaseModel):
+    """Model for present count by classification status."""
+    
+    status: str = Field(..., description="Classification status")
+    count: int = Field(..., description="Number of presents with this status")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "status": "success",
+                "count": 150
+            }
+        }
+
+
+class CountPresentsResponse(BaseModel):
+    """Response model for counting presents grouped by status."""
+    
+    message: str = Field(..., description="Operation result message")
+    total_presents: int = Field(..., description="Total number of presents in the system")
+    status_counts: List[PresentCountByStatus] = Field(..., description="Count of presents grouped by classification status")
+    processing_time_ms: float = Field(..., description="Processing time in milliseconds")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "message": "Present counts retrieved successfully",
+                "total_presents": 200,
+                "status_counts": [
+                    {"status": "success", "count": 150},
+                    {"status": "pending_classification", "count": 30},
+                    {"status": "error_openai_api", "count": 20}
+                ],
+                "processing_time_ms": 15.32
+            }
+        }

@@ -5,7 +5,7 @@ import hashlib
 import time
 
 from .schemas.requests import AddPresentRequest
-from .schemas.responses import CSVImportResponse, CSVImportSummary, DeleteAllPresentsResponse
+from .schemas.responses import CSVImportResponse, CSVImportSummary, DeleteAllPresentsResponse, CountPresentsResponse, PresentCountByStatus
 from ..database.users import authenticate_user
 from ..database import db_factory
 from ..database.csv_import import import_presents_from_csv
@@ -280,4 +280,55 @@ async def delete_all_presents(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error deleting presents: {str(e)}"
+        )
+@app.get("/countPresents", response_model=CountPresentsResponse, status_code=status.HTTP_200_OK)
+async def count_presents(
+    current_user: Dict = Depends(get_current_user)
+):
+    """
+    Count presents grouped by classification status.
+    
+    Returns the total number of presents in the system and a breakdown
+    by classification status (success, pending_classification, error_openai_api, etc.).
+    """
+    start_time = time.time()
+    
+    try:
+        # Get count of presents grouped by status
+        count_query = """
+            SELECT 
+                classification_status,
+                COUNT(*) as count
+            FROM present_attributes 
+            GROUP BY classification_status
+            ORDER BY classification_status
+        """
+        status_results = db_factory.execute_query(count_query)
+        
+        # Get total count
+        total_query = "SELECT COUNT(*) as total FROM present_attributes"
+        total_result = db_factory.execute_query(total_query)
+        total_count = total_result[0]['total'] if total_result else 0
+        
+        # Format the results
+        status_counts = []
+        for row in status_results:
+            status_counts.append(PresentCountByStatus(
+                status=row['classification_status'],
+                count=row['count']
+            ))
+        
+        processing_time_ms = (time.time() - start_time) * 1000
+        
+        return CountPresentsResponse(
+            message="Present counts retrieved successfully",
+            total_presents=total_count,
+            status_counts=status_counts,
+            processing_time_ms=processing_time_ms
+        )
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error counting presents: {str(e)}"
         )
