@@ -20,6 +20,21 @@ from ..scheduler.tasks import fetch_pending_present_attributes
 from ..config.settings import settings
 from ..ml.predictor import get_predictor
 
+def _get_default_attributes() -> Dict[str, Any]:
+    """Get default attributes when classification fails."""
+    return {
+        'item_main_category': 'NONE',
+        'item_sub_category': 'NONE',
+        'color': 'NONE',
+        'brand': 'NONE',
+        'vendor': 'NONE',
+        'target_demographic': 'unisex',
+        'utility_type': 'practical',
+        'durability': 'durable',
+        'usage_type': 'individual',
+        'value_price': 0.0
+    }
+
 # Configure logging
 # Ensure settings.LOG_LEVEL is defined in your src.config.settings
 # Defaulting to INFO if not found or for simplicity in this example.
@@ -152,9 +167,21 @@ async def predict_endpoint(
             detail=f"Could not fetch industry code for CVR: {request_data.cvr}"
         )
     
-    # Step 2: Transform presents
+    # Step 2: Transform presents (with on-the-fly classification if needed)
     transformed_presents = []
-    missing_presents = []
+    
+    # Import classifier for on-the-fly classification
+    from ..data.classifier import DataClassifier
+    from ..data.openai_client import create_openai_client
+    
+    # Create classifier instance
+    openai_client = None
+    try:
+        openai_client = create_openai_client()
+        classifier = DataClassifier(openai_client)
+    except Exception as e:
+        logger.warning(f"Failed to create OpenAI client for classification: {e}")
+        classifier = DataClassifier()  # Will use fallback classification
     
     for present in request_data.presents:
         # Calculate hash using the same logic as /addPresent
@@ -166,41 +193,97 @@ async def predict_endpoint(
         
         present_hash = hashlib.md5(text_to_hash.encode('utf-8')).hexdigest().upper()
         
-        # Lookup in database
+        # First try to lookup in database
         attributes = get_present_by_hash(present_hash)
         
         if not attributes:
-            missing_presents.append({
-                "id": present.id,
-                "description": present.description,
-                "hash": present_hash
-            })
-            continue
+            # Not in database - classify on-the-fly
+            logger.info(f"Present not found in database, classifying on-the-fly: {present.description}")
+            
+            try:
+                # Create a gift item for classification
+                from ..api.schemas.requests import GiftItem
+                gift_item = GiftItem(
+                    product_id=str(present.id),
+                    description=present.description
+                )
+                
+                # Classify the gift
+                classified_gifts = await classifier._classify_gifts([gift_item])
+                
+                if classified_gifts and len(classified_gifts) > 0:
+                    classified_gift = classified_gifts[0]
+                    gift_attrs = classified_gift.attributes
+                    
+                    # Convert to database format
+                    attributes = {
+                        'item_main_category': gift_attrs.itemMainCategory,
+                        'item_sub_category': gift_attrs.itemSubCategory,
+                        'color': gift_attrs.color,
+                        'brand': gift_attrs.brand,
+                        'vendor': gift_attrs.vendor,
+                        'target_demographic': gift_attrs.targetDemographic.value,
+                        'utility_type': gift_attrs.utilityType,
+                        'durability': gift_attrs.durability,
+                        'usage_type': gift_attrs.usageType,
+                        'value_price': gift_attrs.valuePrice
+                    }
+                    
+                    # Optionally save to database for future use
+                    try:
+                        save_query = """
+                            INSERT INTO present_attributes
+                            (present_hash, present_name, model_name, model_no, present_vendor,
+                             item_main_category, item_sub_category, color, brand, vendor,
+                             value_price, target_demographic, utility_type, durability, usage_type,
+                             classification_status)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (present_hash) DO NOTHING
+                        """
+                        db_factory.execute_write(save_query, (
+                            present_hash, present.description, present.model_name, present.model_no, present.vendor,
+                            attributes['item_main_category'], attributes['item_sub_category'],
+                            attributes['color'], attributes['brand'], attributes['vendor'],
+                            attributes['value_price'], attributes['target_demographic'],
+                            attributes['utility_type'], attributes['durability'], attributes['usage_type'],
+                            'success'
+                        ))
+                        logger.info(f"Saved classified present to database: {present_hash}")
+                    except Exception as e:
+                        logger.warning(f"Failed to save classification to database: {e}")
+                    
+                    logger.info(f"Successfully classified present {present.id} on-the-fly")
+                else:
+                    # Classification failed - use defaults
+                    logger.warning(f"Classification returned no results for present {present.id}")
+                    attributes = _get_default_attributes()
+                    
+            except Exception as e:
+                logger.error(f"Failed to classify present {present.id}: {e}")
+                # Use default attributes as fallback
+                attributes = _get_default_attributes()
         
         # Convert to dictionary format for ML predictor
         present_dict = {
             'id': present.id,
-            'item_main_category': attributes.get('item_main_category', ''),
-            'item_sub_category': attributes.get('item_sub_category', ''),
-            'color': attributes.get('color', ''),
-            'brand': attributes.get('brand', ''),
-            'vendor': attributes.get('vendor', ''),
-            'target_demographic': attributes.get('target_demographic', ''),
-            'utility_type': attributes.get('utility_type', ''),
-            'usage_type': attributes.get('usage_type', ''),
-            'durability': attributes.get('durability', '')
+            'item_main_category': attributes.get('item_main_category', 'NONE'),
+            'item_sub_category': attributes.get('item_sub_category', 'NONE'),
+            'color': attributes.get('color', 'NONE'),
+            'brand': attributes.get('brand', 'NONE'),
+            'vendor': attributes.get('vendor', 'NONE'),
+            'target_demographic': attributes.get('target_demographic', 'unisex'),
+            'utility_type': attributes.get('utility_type', 'practical'),
+            'usage_type': attributes.get('usage_type', 'individual'),
+            'durability': attributes.get('durability', 'durable')
         }
         transformed_presents.append(present_dict)
     
-    # Check if any presents were not found
-    if missing_presents:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "message": "Some presents not found in database. Please classify them first using /addPresent endpoint.",
-                "missing_presents": missing_presents
-            }
-        )
+    # Close OpenAI client if created
+    if openai_client:
+        try:
+            await openai_client.close()
+        except:
+            pass
     
     # Step 3: Transform employees
     transformed_employees = []
