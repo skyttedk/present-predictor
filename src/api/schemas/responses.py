@@ -301,3 +301,95 @@ class CountPresentsResponse(BaseModel):
                 "processing_time_ms": 15.32
             }
         }
+
+
+class UserInfo(BaseModel):
+    """Model for user information."""
+    id: int = Field(..., description="User ID")
+    username: str = Field(..., description="Username")
+    is_active: bool = Field(..., description="Whether user is active")
+    is_admin: bool = Field(..., description="Whether user is admin")
+    created_at: str = Field(..., description="User creation timestamp")
+    updated_at: str = Field(..., description="User last update timestamp")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "id": 1,
+                "username": "john_doe",
+                "is_active": True,
+                "is_admin": True,
+                "created_at": "2025-06-17T10:30:00Z",
+                "updated_at": "2025-06-17T10:30:00Z"
+            }
+        }
+
+
+class CreateUserResponse(BaseModel):
+    """Response model for user creation."""
+    message: str = Field(..., description="Success message")
+    user: UserInfo = Field(..., description="Created user information")
+    api_key: str = Field(..., description="Generated API key (only shown once)")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "message": "User created successfully",
+                "user": {
+                    "id": 1,
+                    "username": "john_doe",
+                    "is_active": True,
+                    "is_admin": True,
+                    "created_at": "2025-06-17T10:30:00Z",
+                    "updated_at": "2025-06-17T10:30:00Z"
+                },
+                "api_key": "abc123def456ghi789jkl012mno345pqr678stu901vwx234yz"
+            }
+        }
+
+
+class ListUsersResponse(BaseModel):
+    """Response model for listing users."""
+    message: str = Field(..., description="Success message")
+    users: List[UserInfo] = Field(..., description="List of users")
+    total_count: int = Field(..., description="Total number of users")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "message": "Users retrieved successfully",
+                "total_count": 2,
+                "users": [
+                    {
+                        "id": 1,
+                        "username": "admin_user",
+                        "is_active": True,
+                        "is_admin": True,
+                        "created_at": "2025-06-17T10:30:00Z",
+                        "updated_at": "2025-06-17T10:30:00Z"
+                    },
+                    {
+                        "id": 2,
+                        "username": "regular_user",
+                        "is_active": True,
+                        "is_admin": False,
+                        "created_at": "2025-06-17T10:35:00Z",
+                        "updated_at": "2025-06-17T10:35:00Z"
+                    }
+                ]
+            }
+        }
+
+
+class DeleteUserResponse(BaseModel):
+    """Response model for user deletion."""
+    message: str = Field(..., description="Success message")
+    username: str = Field(..., description="Username that was deleted")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "message": "User deleted successfully",
+                "username": "john_doe"
+            }
+        }

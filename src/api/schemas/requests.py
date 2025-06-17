@@ -175,3 +175,48 @@ class CSVUploadRequest(BaseModel):
                 "description": "Bulk import of pre-classified present attributes"
             }
         }
+
+
+class CreateUserRequest(BaseModel):
+    """Model for creating a new user."""
+    username: str = Field(..., description="Unique username for the new user", min_length=1, max_length=50)
+    
+    @field_validator('username', mode='before')
+    def validate_username(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                raise ValueError("Username cannot be empty")
+            if len(v) < 3:
+                raise ValueError("Username must be at least 3 characters long")
+            # Basic username validation (alphanumeric, underscore, hyphen)
+            if not v.replace('_', '').replace('-', '').isalnum():
+                raise ValueError("Username can only contain letters, numbers, underscores, and hyphens")
+        return v
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "username": "john_doe"
+            }
+        }
+
+
+class DeleteUserRequest(BaseModel):
+    """Model for deleting a user."""
+    username: str = Field(..., description="Username to delete", min_length=1)
+    
+    @field_validator('username', mode='before')
+    def validate_username(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                raise ValueError("Username cannot be empty")
+        return v
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "username": "john_doe"
+            }
+        }

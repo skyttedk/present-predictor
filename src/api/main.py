@@ -4,9 +4,9 @@ from typing import Dict
 import hashlib
 import time
 
-from .schemas.requests import AddPresentRequest
-from .schemas.responses import CSVImportResponse, CSVImportSummary, DeleteAllPresentsResponse, CountPresentsResponse, PresentCountByStatus
-from ..database.users import authenticate_user
+from .schemas.requests import AddPresentRequest, CreateUserRequest, DeleteUserRequest
+from .schemas.responses import CSVImportResponse, CSVImportSummary, DeleteAllPresentsResponse, CountPresentsResponse, PresentCountByStatus, CreateUserResponse, ListUsersResponse, DeleteUserResponse, UserInfo
+from ..database.users import authenticate_user, is_admin_user, create_user, list_users, delete_user, count_users
 from ..database import db_factory
 from ..database.csv_import import import_presents_from_csv
 import logging
@@ -83,6 +83,40 @@ async def get_current_user(api_key: str = Depends(api_key_header)) -> Dict:
             detail="Invalid API Key",
             headers={"WWW-Authenticate": "Header"},
         )
+    return user
+
+async def get_admin_user(api_key: str = Depends(api_key_header)) -> Dict:
+    """
+    Dependency to authenticate admin user via API key.
+    """
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated: API key is missing",
+            headers={"WWW-Authenticate": "Header"},
+        )
+    
+    # Check if no users exist yet (special case for first user creation)
+    user_count = count_users()
+    if user_count == 0:
+        # Allow creation of first user without admin check
+        user = authenticate_user(api_key)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid API Key",
+                headers={"WWW-Authenticate": "Header"},
+            )
+        return user
+    
+    # Normal admin check for existing users
+    if not is_admin_user(api_key):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
+    
+    user = authenticate_user(api_key)
     return user
 
 @app.get("/test")
@@ -331,4 +365,142 @@ async def count_presents(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error counting presents: {str(e)}"
+        )
+
+
+# User Management Endpoints
+
+@app.post("/createUser", response_model=CreateUserResponse, status_code=status.HTTP_201_CREATED)
+async def create_user_endpoint(
+    request_data: CreateUserRequest,
+    admin_user: Dict = Depends(get_admin_user)
+):
+    """
+    Create a new user with API key.
+    
+    The first user created automatically becomes an admin.
+    Subsequent users require admin authentication to create.
+    
+    Returns the new user information and API key (only shown once).
+    """
+    try:
+        user_data = create_user(request_data.username)
+        
+        # Format timestamps for response
+        user_info = UserInfo(
+            id=user_data["user_id"],
+            username=user_data["username"],
+            is_active=True,
+            is_admin=user_data["is_admin"],
+            created_at=str(admin_user.get('created_at', '')),  # Use current time or similar
+            updated_at=str(admin_user.get('updated_at', ''))
+        )
+        
+        # Get fresh user data with timestamps
+        fresh_users = list_users()
+        fresh_user = next((u for u in fresh_users if u['id'] == user_data["user_id"]), None)
+        if fresh_user:
+            user_info.created_at = str(fresh_user['created_at'])
+            user_info.updated_at = str(fresh_user['updated_at'])
+        
+        return CreateUserResponse(
+            message="User created successfully",
+            user=user_info,
+            api_key=user_data["api_key"]
+        )
+        
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error creating user: {str(e)}"
+        )
+
+
+@app.get("/users", response_model=ListUsersResponse, status_code=status.HTTP_200_OK)
+async def list_users_endpoint(
+    active_only: bool = False,
+    admin_user: Dict = Depends(get_admin_user)
+):
+    """
+    List all users in the system.
+    
+    Requires admin authentication.
+    
+    Args:
+        active_only: If True, only return active users
+    """
+    try:
+        users_data = list_users(active_only=active_only)
+        
+        # Convert to UserInfo format
+        users = []
+        for user_data in users_data:
+            user_info = UserInfo(
+                id=user_data["id"],
+                username=user_data["username"],
+                is_active=user_data["is_active"],
+                is_admin=user_data.get("is_admin", False),
+                created_at=str(user_data["created_at"]),
+                updated_at=str(user_data["updated_at"])
+            )
+            users.append(user_info)
+        
+        return ListUsersResponse(
+            message="Users retrieved successfully",
+            users=users,
+            total_count=len(users)
+        )
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving users: {str(e)}"
+        )
+
+
+@app.post("/deleteUser", response_model=DeleteUserResponse, status_code=status.HTTP_200_OK)
+async def delete_user_endpoint(
+    request_data: DeleteUserRequest,
+    admin_user: Dict = Depends(get_admin_user)
+):
+    """
+    Delete a user from the system.
+    
+    Requires admin authentication.
+    Permanently removes the user and all related data.
+    """
+    username_to_delete = request_data.username
+    
+    # Prevent admin from deleting themselves
+    if admin_user.get('username') == username_to_delete:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete your own user account"
+        )
+    
+    try:
+        success = delete_user(username_to_delete)
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"User '{username_to_delete}' not found"
+            )
+        
+        return DeleteUserResponse(
+            message="User deleted successfully",
+            username=username_to_delete
+        )
+        
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error deleting user: {str(e)}"
         )
