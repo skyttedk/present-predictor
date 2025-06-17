@@ -29,7 +29,7 @@ def get_present_hash(present_name: str, model_name: str, model_no: str, vendor: 
     else:
         text_to_hash = f"{present_name} - {model_name} - {model_no}."
     
-    return hashlib.md5(text_to_hash.encode('utf-8')).hexdigest()
+    return hashlib.md5(text_to_hash.encode('utf-8')).hexdigest().upper()
 
 def get_cached_present_classification(
     present_name: str,
