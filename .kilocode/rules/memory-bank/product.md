@@ -1,65 +1,78 @@
-# Product Vision
+# Product Vision: Predictive Gift Selection System
 
 ## Why This Project Exists
 
-Gavefabrikken operates a B2B gift distribution service where companies provide curated gift selections to their employees through dedicated online portals. The company faces significant challenges in demand forecasting, leading to inventory imbalances, operational overhead, and customer dissatisfaction.
+Gavefabrikken operates a B2B gift distribution service where companies provide curated gift selections to their employees through dedicated online portals (Gift Shops). The primary operational challenge lies in accurately forecasting demand for these gifts, especially during peak seasonal periods like Christmas. Inaccurate forecasting leads to significant business inefficiencies.
 
 ## Problems We Solve
 
-### Primary Pain Points
-- **Inventory Imbalances**: Current manual estimation methods result in overstocking and stockouts
-- **Operational Overhead**: Significant post-season complexities from poor demand prediction
-- **Financial Impact**: Increased costs from back-orders and surplus gift returns
-- **Customer Satisfaction**: Unavailable gift selections due to poor inventory planning
+The project aims to address the following critical pain points stemming from manual and basic statistical demand forecasting:
 
-### Current State vs Desired State
-**Current**: Manual estimation + basic statistical averages
-**Target**: ML-powered demand prediction system with accurate quantity forecasts
+-   **Inventory Imbalances:** Overstocking of unpopular gifts and stockouts of desired items, leading to wasted resources and missed opportunities.
+-   **Operational Overhead:** Significant manual effort and complexity in managing inventory post-season, including handling returns and back-orders.
+-   **Increased Costs:** Financial impact from expedited shipping for back-orders, storage of surplus gifts, and potential loss from unsellable returned items.
+-   **Suboptimal Customer Satisfaction:** Employees of client companies may be unable to select their preferred gifts due to unavailability, negatively impacting their experience and, by extension, the client's satisfaction with Gavefabrikken's service.
 
 ## How It Should Work
 
-### Core Workflow
-1. **Data Input**: Companies submit gift catalogs and employee information
-2. **Data Processing**: System classifies gifts and employee demographics
-3. **Prediction**: ML model generates demand forecasts per product
-4. **Output**: Actionable quantity recommendations for inventory planning
+The system is designed as a machine learning-powered demand prediction engine that integrates into Gavefabrikken's operational workflow.
 
-### API Flow
-```
-Step 1: Initial Request (product_id, description, employee names)
-↓
-Step 2: Internal Reclassification (categorized gifts, gender demographics)
-↓
-Step 3: Prediction Response (product_id, expected_qty)
-```
+### Core Workflow:
+
+1.  **Data Input:** The system ingests historical gift selection data, which includes employee demographics (shop, branch, gender) and detailed gift characteristics (categories, brand, color, utility, durability, etc.). For real-time predictions, it accepts company-specific requests detailing the current gift assortment, employee roster, and company context (e.g., CVR, branch).
+2.  **Data Processing & Classification:**
+    *   Historical data is preprocessed and aggregated to identify patterns.
+    *   For new prediction requests, input data (gift descriptions, employee names) is classified into structured features (e.g., gift attributes via OpenAI, employee gender via `gender_guesser`).
+3.  **Prediction Generation:** A machine learning model (currently CatBoost Regressor) uses the processed features to predict the expected quantity for each gift in the given context.
+4.  **API Output:** The predictions are delivered via a RESTful API, providing actionable demand forecasts.
+
+### API Flow (Conceptual):
+
+1.  **Initial API Request:**
+    ```json
+    {
+      "cvr": "12345678", // Company CVR for context
+      "branch_no" : "B001",
+      "gifts" : [
+        {"id" : "P101", "description" : "Luxury Coffee Mug, Blue", "model_name": "CM-001", "vendor": "MugCo"},
+        // ... other gifts
+      ],
+      "employees" : [
+        {"name" : "Jane Doe"},
+        {"name" : "John Smith"}
+        // ... other employees
+      ]
+    }
+    ```
+2.  **Internal Data Reclassification & Enrichment:**
+    *   Gifts are classified into attributes (e.g., `itemMainCategory`, `color`, `brand`).
+    *   Employee names are processed to determine gender.
+    *   Shop-specific features and historical context are resolved.
+3.  **Prediction by ML Model:** The model predicts quantities based on the enriched feature set.
+4.  **API Response:**
+    ```json
+    [
+      {"product_id" : "P101", "expected_qty" : 25, "confidence_score": 0.85},
+      // ... other predictions
+    ]
+    ```
 
 ## User Experience Goals
 
-### For Gavefabrikken Operations Team
-- **Simplicity**: Single API call to get demand forecasts
-- **Accuracy**: Reliable predictions to reduce inventory risks
-- **Speed**: Real-time predictions for operational planning
-- **Transparency**: Clear understanding of prediction rationale
+### For Gavefabrikken Operations & Planning Teams:
 
-### For Business Impact
-- Reduced inventory management costs
-- Minimized post-season operational complexity
-- Enhanced customer satisfaction through better availability
-- Data-driven decision making for seasonal planning
+-   **Accuracy & Reliability:** Provide demand forecasts that are significantly more accurate than current methods, leading to tangible improvements in inventory management.
+-   **Actionability:** Deliver predictions in a clear, understandable format that can be directly used for inventory planning and procurement decisions.
+-   **Timeliness:** Offer predictions quickly enough to be relevant for pre-season planning and in-season adjustments.
+-   **Transparency (Future Goal):** Ideally, provide some insight into the drivers of predictions to build trust and aid in decision-making (though this is a secondary goal to accuracy).
 
-## Success Metrics
+### For Business Impact:
 
-### Technical Metrics
-- Prediction accuracy (target: >85% within ±20% of actual demand)
-- API response time (target: <2 seconds)
-- System uptime (target: 99.5%)
-
-### Business Metrics
-- Reduction in inventory imbalances (target: 40% improvement)
-- Decrease in post-season operational costs
-- Improved customer satisfaction scores
-- ROI from reduced surplus and back-order costs
+-   **Reduced Inventory Costs:** Minimize expenses related to overstocking, stockouts, and returns.
+-   **Improved Operational Efficiency:** Streamline post-season operations by reducing the complexity of managing inventory imbalances.
+-   **Enhanced Customer (Client & Employee) Satisfaction:** Ensure better availability of desired gifts, leading to a more positive experience for employees and greater satisfaction for Gavefabrikken's B2B clients.
+-   **Data-Driven Decision Making:** Shift Gavefabrikken from a reactive to a proactive, analytics-driven approach for seasonal planning and inventory management.
 
 ## Transformation Goal
 
-Transform Gavefabrikken's reactive inventory approach into a proactive, analytics-driven system capable of scaling with business growth while maintaining operational efficiency.
+The ultimate goal is to transform Gavefabrikken's inventory management from a reactive, estimation-based process into a proactive, data-driven, and efficient operation. This system should enable Gavefabrikken to scale its business growth while maintaining high levels of customer satisfaction and operational efficiency.

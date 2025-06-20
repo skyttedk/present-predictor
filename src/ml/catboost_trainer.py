@@ -212,31 +212,21 @@ def engineer_new_interaction_features(df: pd.DataFrame, n_interaction_features: 
     logging.info(f"Shape after new interaction features: {df.shape}")
     return df
 
-def prepare_features_for_catboost(final_features_df: pd.DataFrame, grouping_cols: list) -> tuple[pd.DataFrame, pd.Series, pd.Series, list]:
-    """Prepares X, y, y_strata, and identifies categorical features for CatBoost."""
-    logging.info("[FEATURES PREP] Preparing final X, y for CatBoost...")
+def prepare_features_for_catboost(final_features_df: pd.DataFrame, grouping_cols: list) -> tuple[pd.DataFrame, pd.Series, pd.Series, list, dict]:
+    """Prepares X, y, y_strata, identifies categorical features, and calculates numeric medians for CatBoost."""
+    logging.info("[FEATURES PREP] Preparing final X, y for CatBoost and calculating medians...")
     if final_features_df.empty or 'selection_count' not in final_features_df.columns:
         logging.warning("Skipping final feature preparation as final_features_df is empty or 'selection_count' is missing.")
-        return pd.DataFrame(), pd.Series(dtype='float64'), pd.Series(dtype='float64'), []
+        return pd.DataFrame(), pd.Series(dtype='float64'), pd.Series(dtype='float64'), [], {}
 
     y = pd.to_numeric(final_features_df['selection_count'], errors='coerce').fillna(0)
     X = final_features_df.drop(columns=['selection_count']).copy()
 
-    # Define base categorical features for CatBoost
-    # These are the original features used for grouping, plus shop-level derived categoricals
     cat_feature_names = list(grouping_cols)
     cat_feature_names.extend([
         'shop_most_frequent_main_category_selected',
         'shop_most_frequent_brand_selected',
-        # The diversity features are numeric counts, not categorical strings
-        # 'shop_main_category_diversity_selected', 
-        # 'shop_brand_diversity_selected',
-        # 'shop_utility_type_diversity_selected',
-        # 'shop_sub_category_diversity_selected'
     ])
-    
-    # 'is_shop_most_frequent_main_category' and 'is_shop_most_frequent_brand' are already 0/1 numeric.
-    # Interaction hashes are numeric.
 
     valid_categorical_features = []
     for col in cat_feature_names:
@@ -246,35 +236,49 @@ def prepare_features_for_catboost(final_features_df: pd.DataFrame, grouping_cols
         else:
             logging.warning(f"Categorical feature '{col}' intended for CatBoost not found in X.")
     
-    final_cat_feature_indices = [X.columns.get_loc(col) for col in valid_categorical_features if col in X.columns]
-
-
-    # Handle potential NaNs and ensure correct types for remaining (numeric) columns
+    # Calculate medians for numeric columns BEFORE filling NaNs
+    numeric_medians = {}
     for col in X.columns:
         if col not in valid_categorical_features: # If it's supposed to be numeric
-            if X[col].dtype == 'object': # If it's an object, try to convert
+            # Attempt to convert to numeric if it's an object type
+            if X[col].dtype == 'object':
                 X[col] = pd.to_numeric(X[col], errors='coerce')
             
-            if pd.api.types.is_numeric_dtype(X[col]): # If numeric (or successfully converted)
-                 if X[col].isnull().any():
-                    X[col] = X[col].fillna(X[col].median()) # Fill NaNs with median
-            else: # If still not numeric after attempts
-                logging.warning(f"Column '{col}' could not be made numeric and is not categorical. Filling with 0.")
-                X[col] = 0 # Fallback for problematic columns
-        elif X[col].isnull().any(): # If it's a categorical column with NaNs
-             X[col] = X[col].fillna("NONE") # CatBoost handles string 'NONE' in categorical features
+            if pd.api.types.is_numeric_dtype(X[col]):
+                numeric_medians[col] = X[col].median()
+            else:
+                # If still not numeric, it might be problematic or an unexpected type.
+                # For now, we'll assign a default median of 0 for such cases,
+                # but this should be reviewed if it occurs frequently.
+                numeric_medians[col] = 0.0
+                logging.warning(f"Column '{col}' is not numeric after conversion attempts. Default median set to 0.")
 
-    # Stratification target
+    # Handle potential NaNs and ensure correct types
+    for col in X.columns:
+        if col not in valid_categorical_features: # Numeric column
+            if X[col].isnull().any():
+                X[col] = X[col].fillna(numeric_medians.get(col, 0)) # Fill NaNs with calculated median or 0 if median not found
+            # Ensure it's numeric after filling
+            if not pd.api.types.is_numeric_dtype(X[col]):
+                 X[col] = pd.to_numeric(X[col], errors='coerce').fillna(numeric_medians.get(col, 0))
+
+
+        elif X[col].isnull().any(): # Categorical column with NaNs
+             X[col] = X[col].fillna("NONE") # CatBoost handles string 'NONE' in categorical features
+    
+    final_cat_feature_indices = [X.columns.get_loc(col) for col in valid_categorical_features if col in X.columns]
+
     y_strata = pd.cut(y, bins=[-1, 0, 1, 2, 5, 10, np.inf], labels=[0, 1, 2, 3, 4, 5], include_lowest=True)
 
     logging.info(f"Final X features shape: {X.shape}")
     logging.info(f"Target y shape: {y.shape}")
     logging.info(f"Categorical features for CatBoost ({len(valid_categorical_features)}): {valid_categorical_features}")
     logging.info(f"Categorical feature indices: {final_cat_feature_indices}")
+    logging.info(f"Calculated numeric medians: {numeric_medians}")
     if not y_strata.empty:
       logging.info(f"Stratification distribution:\n{y_strata.value_counts().sort_index().to_dict()}")
     
-    return X, y, y_strata, valid_categorical_features
+    return X, y, y_strata, valid_categorical_features, numeric_medians
 
 
 # --- Main Pipeline ---
@@ -297,20 +301,18 @@ def main():
     features_with_shop = engineer_shop_assortment_features(agg_df)
 
     # 4. Engineer New Interaction Features
-    # Note: The notebook had rank/share features commented out due to leakage.
-    # We are only adding interaction hashes as per the non-leaky plan.
     final_features_df = engineer_new_interaction_features(features_with_shop)
 
     # 5. Prepare Features for CatBoost
-    X, y, y_strata, cat_features_for_model = prepare_features_for_catboost(final_features_df, base_grouping_cols)
+    X, y, y_strata, cat_features_for_model, numeric_medians = prepare_features_for_catboost(final_features_df, base_grouping_cols)
     
     if X.empty or y.empty:
         logging.error("Feature preparation failed. Exiting.")
         return
 
-    # Placeholder for further steps (training, tuning, evaluation, saving)
     logging.info("--- Data Preparation Complete ---")
     logging.info(f"X shape: {X.shape}, y shape: {y.shape}, Num Cat Features: {len(cat_features_for_model)}")
+    logging.info(f"Numeric Medians: {numeric_medians}")
     
     # 6. Train Initial CatBoost Model
     X_train, X_val, y_train, y_val = train_test_split(
@@ -338,7 +340,7 @@ def main():
 
     # 7. Hyperparameter Tuning with Optuna
     best_params_optuna = tune_hyperparameters_optuna(
-        X_train, y_train, X_val, y_val, cat_features_for_model, n_trials=15 # Use a small number for quick test, increase for production
+        X_train, y_train, X_val, y_val, cat_features_for_model, n_trials=15
     )
     
     if not best_params_optuna:
@@ -346,13 +348,12 @@ def main():
         best_params_final = initial_model_params
     else:
         best_params_final = best_params_optuna
-        best_params_final['loss_function'] = 'Poisson' # Ensure these are set
+        best_params_final['loss_function'] = 'Poisson'
         best_params_final['eval_metric'] = 'R2'
         best_params_final['random_seed'] = 42
         best_params_final['verbose'] = 100
-        if 'early_stopping_rounds' not in best_params_final: # Optuna might not suggest this if not in search space
+        if 'early_stopping_rounds' not in best_params_final:
              best_params_final['early_stopping_rounds'] = initial_model_params.get('early_stopping_rounds', 50)
-
 
     # 8. Train Final Model with Best/Chosen Parameters
     trained_final_model, final_metrics_val = train_catboost_model(
@@ -381,7 +382,8 @@ def main():
         list(X.columns),
         cat_features_for_model,
         MODELS_DIR,
-        importance_df
+        importance_df,
+        numeric_medians # Pass medians to save_model_artifacts
     )
 
     logging.info("--- CatBoost Model Training Pipeline Finished ---")
@@ -396,11 +398,11 @@ def train_catboost_model(X_train, y_train, X_val, y_val, cat_features, params, m
     model.fit(
         X_train, y_train,
         eval_set=(X_val, y_val),
-        early_stopping_rounds=params.get('early_stopping_rounds', 50) # Ensure this is used
+        early_stopping_rounds=params.get('early_stopping_rounds', 50)
     )
     
     y_pred_val = model.predict(X_val)
-    y_pred_val = np.maximum(0, y_pred_val) # Ensure non-negative predictions
+    y_pred_val = np.maximum(0, y_pred_val)
 
     r2_val = r2_score(y_val, y_pred_val)
     mae_val = mean_absolute_error(y_val, y_pred_val)
@@ -431,7 +433,7 @@ def tune_hyperparameters_optuna(X_train, y_train, X_val, y_val, cat_features, n_
             'eval_metric': 'R2',
             'random_seed': 42,
             'verbose': 0,
-            'early_stopping_rounds': 50 # Fixed for trial consistency
+            'early_stopping_rounds': 50
         }
         model = CatBoostRegressor(**param, cat_features=cat_features)
         model.fit(X_train, y_train, eval_set=[(X_val, y_val)], early_stopping_rounds=param['early_stopping_rounds'], verbose=0)
@@ -502,12 +504,12 @@ def analyze_and_save_feature_importance(model, feature_names, save_path):
     plt.title('CatBoost Feature Importance (Top 20)')
     plt.tight_layout()
     plt.savefig(save_path)
-    plt.close() # Close plot to free memory
+    plt.close()
     logging.info(f"Feature importance plot saved to: {save_path}")
     return importance_df
 
-def save_model_artifacts(model, params, metrics, feature_list, cat_feature_list, model_dir, importance_df):
-    """Saves the trained model, parameters, metrics, and other metadata."""
+def save_model_artifacts(model, params, metrics, feature_list, cat_feature_list, model_dir, importance_df, numeric_medians):
+    """Saves the trained model, parameters, metrics, numeric medians, and other metadata."""
     logging.info(f"[SAVE] Saving model artifacts to {model_dir}...")
 
     model_path = os.path.join(model_dir, 'catboost_poisson_model.cbm')
@@ -530,6 +532,7 @@ def save_model_artifacts(model, params, metrics, feature_list, cat_feature_list,
         'training_timestamp': datetime.now().isoformat(),
         'features_used': feature_list,
         'categorical_features_in_model': cat_feature_list,
+        'numeric_feature_medians': numeric_medians, # Save medians
         'model_parameters': params,
         'performance_metrics': metrics,
         'feature_importance_summary': importance_df.head(20).set_index('feature')['importance'].to_dict()

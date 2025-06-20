@@ -73,7 +73,7 @@ Technology Stack:
 Python-based solution leveraging:
 
 Data Processing: Pandas for aggregation and grouping operations
-Machine Learning: XGBoost Regressor for demand prediction
+Machine Learning: CatBoost Regressor for demand prediction
 Model Evaluation: Scikit-learn metrics for performance assessment
 
 Key Development Notes:
@@ -81,14 +81,14 @@ Data Aggregation Example:
 final_df = structured_data.groupby(['date', 'category', 'product_base', 'color', 'type', 'size']).agg({'qty_sold': 'sum'}).reset_index()
 Model Training Hints:
 
-Use XGBRegressor
+Use CatBoost Regressor
 Focus on metrics evaluation
 
 Development Phases:
 
 Historical data preprocessing and feature engineering
 Exploratory data analysis with focus on aggregation patterns
-Model training and validation using XGBoost regression
+Model training and validation using CatBoost regression
 API development for real-time prediction delivery
 Performance monitoring and model refinement
 

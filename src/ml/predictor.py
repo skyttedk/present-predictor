@@ -211,7 +211,7 @@ class GiftDemandPredictor:
             
             # Aggregate predictions
             total_prediction = self._aggregate_predictions(
-                predictions, employee_ratios, total_employees
+                predictions, total_employees # employee_ratios no longer needed for main calc
             )
             
             # Calculate confidence
@@ -244,10 +244,10 @@ class GiftDemandPredictor:
             'product_sub_category': present.get('item_sub_category', 'NONE'),
             'product_brand': present.get('brand', 'NONE'),
             'product_color': present.get('color', 'NONE'),
-            'product_durability': present.get('durability', 'durable'),
-            'product_target_gender': present.get('target_demographic', 'unisex'),
-            'product_utility_type': present.get('utility_type', 'practical'),
-            'product_type': present.get('usage_type', 'individual')
+            'product_durability': present.get('durability', 'NONE'),
+            'product_target_gender': present.get('target_demographic', 'NONE'),
+            'product_utility_type': present.get('utility_type', 'NONE'),
+            'product_type': present.get('usage_type', 'NONE')
         }
         
         # Add shop-level features
@@ -300,17 +300,27 @@ class GiftDemandPredictor:
         
         for col in numeric_cols:
             if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-        
+                # Fill NaNs using loaded medians, fallback to 0 if median not available for a specific column
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(self.numeric_medians.get(col, 0))
+            # Ensure the column exists even if not in input, fill with median or 0
+            elif col in self.numeric_medians:
+                 df[col] = self.numeric_medians[col]
+            else: # Fallback if column is expected but not in input and no median
+                 df[col] = 0.0
+
+
         # Add missing columns with defaults
         for col in self.expected_columns:
-            if col not in df.columns:
+            if col not in df.columns: # This handles columns that might not have been in numeric_cols or categorical_features explicitly
                 if col.startswith('interaction_hash_'):
-                    df[col] = 0.0
+                    df[col] = self.numeric_medians.get(col, 0.0) # Use median if available for hashes too
                 elif col in self.categorical_features:
                     df[col] = "NONE"
-                else:
-                    df[col] = 0
+                elif col in self.numeric_medians: # Other numeric columns expected
+                    df[col] = self.numeric_medians[col]
+                else: # Absolute fallback for unexpected missing columns
+                    df[col] = 0.0
+                    logger.warning(f"Column '{col}' was missing from input and no median found. Defaulted to 0.0.")
         
         # Reorder columns to match training
         df = df[self.expected_columns]
@@ -339,24 +349,23 @@ class GiftDemandPredictor:
         return predictions
     
     def _aggregate_predictions(self, predictions: np.ndarray,
-                             employee_ratios: np.ndarray, total_employees: int) -> float:
-        """Aggregate individual predictions to total quantity"""
+                             total_employees: int) -> float: # employee_ratios removed
+        """
+        Aggregate model predictions to total quantity.
+        The model's output for each gender-specific feature vector is treated as the
+        total expected quantity for that specific context. These are summed.
+        """
         
-        # The model predicts expected selections per employee for each gender group
-        # Weight by gender ratios to get overall expected selections per employee
-        weighted_predictions = predictions * employee_ratios
-        expected_per_employee = np.sum(weighted_predictions)
+        # Sum the raw predictions from the model. Each prediction is for a specific
+        # gender context and is interpreted as the total expected quantity for that context.
+        total_prediction = np.sum(predictions)
         
-        # Scale by total employees to get total expected quantity
-        total_prediction = expected_per_employee * total_employees
-        
-        # Apply scaling factor to bring predictions to reasonable range
-        # The model was trained on aggregated historical data and needs calibration
-        # for individual prediction scenarios. Scaling factor determined empirically.
-        scaling_factor = 0.15  # TODO: Calibrate based on validation data
-        total_prediction = total_prediction * scaling_factor
+        # The scaling_factor was an empirical fix for the previous misinterpretation.
+        # With Option A, the direct model output (summed) is used.
+        # scaling_factor = 1.0 # Effectively no change if left, but removed for clarity.
         
         # Ensure non-negative and maximum of all employees (100% selection is possible)
+        # This capping might still be a useful heuristic.
         total_prediction = max(0, min(total_prediction, total_employees))
         
         return total_prediction

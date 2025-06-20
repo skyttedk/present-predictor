@@ -1,374 +1,138 @@
 # System Architecture
 
 ## Overview
-The Predictive Gift Selection System follows a modular architecture with clear separation of concerns between data processing, machine learning, and API layers.
+The Predictive Gift Selection System follows a modular architecture with clear separation of concerns between data processing, machine learning, and API layers. The current primary focus is on resolving a mismatch between the ML model's training target and its interpretation during prediction.
 
 ## High-Level Architecture
 
-```
-┌─────────────────┐    ┌──────────────────┐    ┌──────────────────────┐
-│   API Gateway   │────│  Data Pipeline   │────│ Two-Stage Prediction │
-│   (FastAPI)     │    │   (Pandas)       │    │    (CatBoost)        │
-└─────────────────┘    └──────────────────┘    └──────────────────────┘
-         │                       │                       │
-         │              ┌──────────────────┐              │
-         └──────────────│ Data Storage     │──────────────┘
-                        │ (Files/Database) │
-                        └──────────────────┘
+```mermaid
+graph TD
+    A[API Gateway (FastAPI)] --> B{Request Processing & Validation};
+    B --> C{Feature Engineering & Context Resolution};
+    C --> D[Data Storage / Cache (Present Attributes)];
+    C --> E{ML Prediction (CatBoost Regressor)};
+    E --> F{Prediction Aggregation & Formatting};
+    F --> A;
+    subgraph DataSources
+        G[Historical Data (CSV)]
+        H[Present Attributes Schema (JSON)]
+        I[Real-time Request Data]
+    end
+    G --> J[Model Training Pipeline (catboost_trainer.py)];
+    H --> C;
+    I --> B;
+    J --> K[Trained CatBoost Model];
+    K --> E;
+    D --> C;
 ```
 
 ## Core Components
 
 ### 1. API Layer
-**Location**: `/src/api/`
-- **Framework**: FastAPI for RESTful API
+**Location**: [`src/api/`](src/api/:1)
+- **Framework**: FastAPI
 - **Responsibilities**:
-  - Request validation and parsing
-  - API endpoint management
-  - Response formatting
-  - Error handling
+  - Request validation and parsing (using Pydantic schemas).
+  - API endpoint management (e.g., `/predict`).
+  - Response formatting.
+  - Orchestration of feature processing and prediction.
+- **Key Files**:
+  - [`src/api/main.py`](src/api/main.py:1): FastAPI application entry point, `/predict` endpoint.
+  - [`src/api/schemas/requests.py`](src/api/schemas/requests.py:1): API request models.
+  - [`src/api/schemas/responses.py`](src/api/schemas/responses.py:1): API response models.
 
-**Key Files**:
-- `main.py` - FastAPI application entry point (includes `/test`, `/addPresent`, `/addPresentsProcessed`, `/deleteAllPresents`, scheduler initialization)
-- `endpoints/` - API route definitions (e.g., `/predict`)
-- `schemas/` - Pydantic models for request/response validation (e.g., `AddPresentRequest`, `CSVImportResponse`, `DeleteAllPresentsResponse`)
-- `middleware/` - Request/response processing
-- `scheduler/tasks.py` - Background task for automatic present classification
-
-### 2. Data Pipeline Layer
-**Location**: `/src/data/`
-- **Framework**: Pandas for data manipulation
+### 2. Data Processing & Feature Engineering Layer
+**Location**: [`src/data/`](src/data/:1), [`src/ml/shop_features.py`](src/ml/shop_features.py:1)
+- **Frameworks**: Pandas
 - **Responsibilities**:
-  - Historical data preprocessing
-  - Gift classification and feature extraction
-  - Employee demographic processing
-  - Data aggregation and transformation
-
-**Key Files**:
-- `preprocessor.py` - Data cleaning and transformation
-- `classifier.py` - Gift categorization logic
-- `openai_client.py` - OpenAI Assistant API integration for present classification
-- `gender_classifier.py` - Enhanced gender classification with Danish name support
-- `aggregator.py` - Data grouping and aggregation
-- `schemas/` - Data structure definitions
-
-### 6. Database Layer (New)
-**Location**: `/src/database/`
-- **Framework**: PostgreSQL with psycopg2
-- **Responsibilities**:
-  - Database connections and query execution
-  - CSV import with bulk operations (500x performance improvement)
-  - User authentication and API key management
-  - Present attribute caching and management
-
-**Key Files**:
-- `csv_import.py` - Optimized bulk CSV import functionality (3 seconds vs 26 minutes)
-- `db_postgres.py` - PostgreSQL connection management
-- `db_factory.py` - Database abstraction layer
-- `users.py` - User authentication system
-- `presents.py` - Present attribute management
-- `api_logs.py` - API request/response logging
+  - **Historical Data Preprocessing** (in [`src/ml/catboost_trainer.py`](src/ml/catboost_trainer.py:1)): Cleaning, aggregation to create `selection_count`.
+  - **Real-time Feature Engineering** (in [`src/ml/predictor.py`](src/ml/predictor.py:1), [`src/ml/shop_features.py`](src/ml/shop_features.py:1)):
+    - Classification of gift attributes (potentially using OpenAI, as per `OpenAISettings` in [`src/config/settings.py`](src/config/settings.py:94)).
+    - Employee gender classification (e.g., `gender_guesser`).
+    - Resolution of shop-specific features.
+    - Creation of feature vectors for the ML model.
+- **Key Files**:
+  - [`src/data/classifier.py`](src/data/classifier.py:1): Gift categorization logic (if used).
+  - [`src/data/gender_classifier.py`](src/data/gender_classifier.py:1): Gender classification.
+  - [`src/ml/shop_features.py`](src/ml/shop_features.py:1): `ShopFeatureResolver` for shop-specific context.
+  - [`src/ml/predictor.py`](src/ml/predictor.py:1): Orchestrates feature creation for prediction.
 
 ### 3. Machine Learning Layer
-**Location**: `/src/ml/`
-- **Framework**: CatBoost with Two-Stage Architecture
+**Location**: [`src/ml/`](src/ml/:1)
+- **Framework**: CatBoost
 - **Responsibilities**:
-  - Two-stage model: Binary classification + Count regression
-  - Feature engineering (11 base + shop features + new share/rank features)
-  - Native categorical handling
-  - Model performance monitoring
-
-**Key Files**:
-- `model.py` - CatBoost model implementations (classifier & regressor)
-- `two_stage.py` - Two-stage prediction pipeline
-- `features.py` - Feature engineering (base, shop-level, share/rank features)
-- `trainer.py` - Model training orchestration
-- `predictor.py` - Combined prediction service
-- `evaluation.py` - Model metrics and validation
+  - **Model Training** ([`src/ml/catboost_trainer.py`](src/ml/catboost_trainer.py:1)):
+    - Trains a `CatBoostRegressor` model with a `Poisson` loss function.
+    - Target variable: `selection_count` (total occurrences of a feature combination).
+    - Includes feature engineering (shop assortment, interaction features).
+    - Hyperparameter tuning with Optuna.
+  - **Prediction** ([`src/ml/predictor.py`](src/ml/predictor.py:1)):
+    - Loads the trained CatBoost model.
+    - Makes predictions based on engineered features.
+    - **Current Critical Issue**: The aggregation logic in `_aggregate_predictions()` misinterprets the model's output.
+- **Key Files**:
+  - [`src/ml/catboost_trainer.py`](src/ml/catboost_trainer.py:1): Training pipeline.
+  - [`src/ml/predictor.py`](src/ml/predictor.py:1): Prediction service.
+  - Model artifacts stored in `models/catboost_poisson_model/`.
 
 ### 4. Configuration Layer
-**Location**: `/src/config/`
-- **Responsibilities**:
-  - Environment configuration
-  - Model hyperparameters
-  - API settings
-  - Database connections
-  - Scheduler configuration
+**Location**: [`src/config/`](src/config/:1)
+- **Responsibilities**: Manages application, API, data, model, and external service (e.g., OpenAI) configurations using Pydantic.
+- **Key Files**:
+  - [`src/config/settings.py`](src/config/settings.py:1): Main application settings.
+  - [`src/config/model_config.py`](src/config/model_config.py:1): (Potentially outdated) XGBoost-focused model configurations. The CatBoost settings are primarily in `settings.py`.
 
-### 5. Scheduler Layer
-**Location**: Integrated into FastAPI app
-- **Framework**: APScheduler
-- **Responsibilities**:
-  - Periodic execution of classification tasks
-  - Background processing of pending presents
-  - Error handling and retry logic
+## Data Flow Architecture (Focus on Prediction & Current Issue)
 
-## Data Flow Architecture
+**Input Data for Prediction:**
+- API Request: Branch code, list of presents (with attributes), list of employees (with gender).
+- Historical Data: Used by `ShopFeatureResolver` and for model training context (medians, etc.).
+- Present Attributes: Cached or classified attributes for gifts.
 
-### Real Data Structure Analysis
+**Prediction Pipeline (`predictor.py`):**
+1.  **Request Input**: Branch, presents, employees.
+2.  **Context Resolution**:
+    *   Calculate employee gender statistics (ratios).
+    *   Resolve shop-specific features using `ShopFeatureResolver`.
+3.  **Feature Vector Creation**: For each present, create feature vectors. The current logic creates them per gender group present in the request.
+4.  **Model Prediction**: The CatBoost model predicts a value for each feature vector.
+    *   **Model Output Interpretation**: The model was trained on `selection_count` (an absolute count for a historical combination).
+5.  **Prediction Aggregation (`_aggregate_predictions`) - CURRENTLY FLAWED**:
+    *   **Incorrect Assumption**: Assumes model output is a "per-employee rate".
+    *   **Incorrect Scaling**: Multiplies this presumed rate by `employee_ratios` and `total_employees` from the current request.
+    *   **Result**: Uniform and incorrect `expected_qty`.
+6.  **Response Generation**: Formats predictions into API response.
 
-**Historical Training Data** (`present.selection.historic.csv`):
-```
-employee_shop, employee_branch, employee_gender,
-product_main_category, product_sub_category, product_brand,
-product_color, product_durability, product_target_gender,
-product_utility_type, product_type
-```
+**Proposed Correction (Option A):**
+1.  The CatBoost model output for a given feature vector (representing a present in a specific context, e.g., for a gender group) should be treated as the **total expected quantity for that specific context**.
+2.  The `_aggregate_predictions` function in [`src/ml/predictor.py`](src/ml/predictor.py:1) needs to be modified. If predictions are made per gender group for a single present, these context-specific total quantities should be summed up to get the final `expected_qty` for that present. The problematic scaling by `employee_ratios` and `total_employees` (in the sense of converting a rate) must be removed.
 
-**Classification Schema** (`present.attributes.schema.json`):
-```json
-{
-  "present_name": "string",
-  "present_vendor": "string",
-  "model_name": "string",
-  "model_no": "string",
-  "itemMainCategory": "string",
-  "itemSubCategory": "string",
-  "color": "string",
-  "brand": "string",
-  "vendor": "string",
-  "valuePrice": "number",
-  "targetDemographic": "male|female|unisex",
-  "utilityType": "practical|work|aesthetic|status|sentimental|exclusive",
-  "durability": "consumable|durable",
-  "usageType": "shareable|individual"
-}
-```
+## Key Technical Decisions & Design Patterns
 
-### Five-Step API Processing Pipeline (Two-Stage Model)
+-   **FastAPI for API**: Leverages Pydantic for data validation and auto-documentation.
+-   **Pydantic for Configuration**: Centralized and typed settings management.
+-   **CatBoost for ML**: Chosen for its handling of categorical features and performance. Poisson loss for count data.
+-   **Modular Structure**: Separation of API, data processing, and ML concerns.
+-   **Singleton Pattern for Predictor**: [`get_predictor()`](src/ml/predictor.py:403) ensures efficient model loading.
+-   **Feature Hashing**: Used for interaction features to manage dimensionality.
 
-```
-Step 0a: Add Present (Optional, via /addPresent endpoint)
-├── Input: {present_name, present_vendor, model_name, model_no}
-├── Processing: Calculate MD5 hash, check if exists in `present_attributes`.
-│             If not, add to `present_attributes` with 'pending_classification' status.
-└── Output: Confirmation or existing present details.
-
-Step 0b: Bulk CSV Import (Optional, via /addPresentsProcessed endpoint)
-├── Input: CSV file with pre-classified present attributes
-├── Processing:
-│   ├── Parse CSV with robust error handling
-│   ├── Bulk existence check using IN clause (1 query vs thousands)
-│   ├── Batch insert using executemany() (1 operation vs thousands)
-│   └── Single transaction for entire operation
-└── Output: Import statistics (imported, skipped, errors, processing time)
-
-Step 0c: Delete All Presents (Testing, via /deleteAllPresents endpoint)
-├── Input: Authenticated request
-├── Processing: DELETE FROM present_attributes
-└── Output: Deletion count and processing time
-
-Step 1: Raw Request Processing (for /predict endpoint)
-├── Input: {branch_no, gifts[{present_name, present_vendor, model_name, model_no}], employees[{name}]}
-├── Validation: Request schema validation
-└── Output: Validated raw data
-
-Step 2: Data Reclassification
-├── Input: Validated raw data (gifts will be looked up in `present_attributes` or classified if status is 'pending_classification' or missing)
-├── Processing:
-│   ├── Gift details (name, vendor, model, model_no) → JSON schema attributes (OpenAI Assistant API)
-│   ├── Employee name → gender classification (Enhanced gender_guesser with Danish names)
-│   └── Field mapping: JSON schema → CSV column names
-└── Output: Classified feature data matching historical structure
-
-Step 2.5: Background Classification (Scheduler)
-├── Every 2 minutes: APScheduler triggers `fetch_pending_present_attributes`
-├── Queries database for presents with 'pending_classification' status
-├── For each pending present:
-│   ├── Send to OpenAI Assistant API
-│   ├── Parse classification response
-│   └── Update database with classified attributes
-└── Error handling: Mark as 'error_openai_api' if classification fails
-
-Step 3: Two-Stage Prediction
-├── Input: Classified feature data (CSV format)
-├── Stage 1: Binary classification - Will select? (CatBoostClassifier)
-├── Stage 2: Count regression - How many? (CatBoostRegressor with Poisson)
-└── Combined: P(select) × Expected_count
-
-Step 4: Response Generation
-├── Input: Combined predictions with confidence intervals
-├── Processing: Format results with uncertainty estimates
-└── Output: {product_id, expected_qty, confidence_interval}[]
-```
-
-### Data Field Mapping
-```
-API Classification → Historical Training Data
-itemMainCategory → product_main_category
-itemSubCategory → product_sub_category
-color → product_color
-brand → product_brand
-targetDemographic → product_target_gender
-utilityType → product_utility_type
-durability → product_durability
-usageType → product_type
-vendor → (not in historical data)
-valuePrice → (not in historical data)
-```
-
-## Key Technical Decisions
-
-### Data Processing Strategy
-- **Pandas-based pipeline** for structured data manipulation
-- **Groupby aggregation** pattern for historical data analysis
-- **Feature engineering** focused on categorical variables
-- **Real-time classification** for incoming requests
-
-### Machine Learning Approach
-- **CatBoost Two-Stage Model** for count prediction
-  - Stage 1: Binary classification (selection probability)
-  - Stage 2: Poisson regression (count if selected)
-- **Native categorical handling** for high-cardinality features
-- **No log transformation** needed with Poisson loss
-- **Enhanced features**: Shop shares, ranks, interactions
-- **Stratified + Leave-One-Shop-Out CV** for robust evaluation
-
-### API Design Patterns
-- **RESTful architecture** with clear resource endpoints
-- **Request/Response validation** using Pydantic schemas
-- **Error handling** with standardized error responses
-- **Stateless design** for scalability
-
-## Component Relationships
-
-### Data Dependencies
-```
-Historical Data → Preprocessor → Feature Engineering → Model Training
-                              ↘                    ↗
-API Request (/predict) → Classifier → Feature Extraction → Prediction
-API Request (/addPresent) → Add to `present_attributes` (for future classification/lookup)
-API Request (/addPresentsProcessed) → Bulk CSV Import (OPTIMIZED: 500x faster)
-API Request (/deleteAllPresents) → Clear all data (for testing)
-```
-
-### Service Integration
-- **API Layer** calls **Data Pipeline** for request processing
-- **Data Pipeline** feeds **ML Layer** for feature preparation
-- **ML Layer** returns predictions to **API Layer**
-- **Configuration Layer** provides settings to all components
-
-## Source Code Structure (Planned)
-
+## Source Code Structure
+(As outlined in `README.md` and confirmed by file tree)
 ```
 src/
-├── api/
-│   ├── main.py              # FastAPI app entry point
-│   ├── endpoints/
-│   │   └── predictions.py   # Prediction endpoints (e.g. /predict)
-│   │   └── presents.py      # Present management endpoints (e.g. /addPresent - though currently in main.py)
-│   ├── schemas/
-│   │   ├── requests.py      # API request models
-│   │   └── responses.py     # API response models
-│   └── middleware/
-│       └── validation.py    # Request validation
-├── data/
-│   ├── preprocessor.py      # Data cleaning pipeline
-│   ├── classifier.py        # Gift categorization
-│   ├── aggregator.py        # Data aggregation logic
-│   └── schemas/
-│       └── data_models.py   # Data structure definitions
-├── ml/
-│   ├── model.py             # CatBoost model wrappers
-│   ├── two_stage.py         # Two-stage prediction logic
-│   ├── features.py          # Feature engineering (enhanced)
-│   ├── trainer.py           # Model training pipeline
-│   ├── predictor.py         # Combined prediction service
-│   └── evaluation.py        # Model metrics (MAPE, RMSE, R²)
-├── config/
-│   ├── settings.py          # Application configuration
-│   └── model_config.py      # ML model parameters
-└── utils/
-    ├── logging.py           # Logging configuration
-    └── exceptions.py        # Custom exception classes
+├── api/                 # FastAPI application and endpoints
+├── data/               # Data processing and classification helpers
+├── ml/                 # Machine learning models, training, prediction, features
+├── config/             # Application and model configuration
+└── utils/              # Logging, exceptions (if any)
 ```
 
 ## Critical Implementation Paths
 
-### 1. Data Aggregation Pattern
-```python
-# Core aggregation logic from requirements
-final_df = structured_data.groupby([
-    'date', 'category', 'product_base', 
-    'color', 'type', 'size'
-]).agg({'qty_sold': 'sum'}).reset_index()
-```
+1.  **Model Training Target Definition** ([`src/ml/catboost_trainer.py`](src/ml/catboost_trainer.py:108)): `selection_count = cleaned_data.groupby(grouping_cols).size().reset_index(name='selection_count')`. This defines what the model learns.
+2.  **Prediction Aggregation Logic** ([`src/ml/predictor.py`](src/ml/predictor.py:351-372)): `_aggregate_predictions()`. This is where the misinterpretation occurs and needs correction as per Option A.
+3.  **Feature Engineering Consistency**: Ensuring features created at inference time in [`src/ml/predictor.py`](src/ml/predictor.py:1) precisely match those used in training ([`src/ml/catboost_trainer.py`](src/ml/catboost_trainer.py:1)), including handling of missing values, defaults, and data types. The use of `numeric_medians` loaded from training artifacts is a good step here.
 
-### 2. Two-Stage Model Training Flow
-```python
-# Stage 1: Binary Classification
-from catboost import CatBoostClassifier
-classifier = CatBoostClassifier(
-    iterations=500,
-    cat_features=categorical_cols,
-    random_state=42
-)
-classifier.fit(X_train, y_binary, eval_set=(X_val, y_val_binary))
-
-# Stage 2: Count Regression (positives only)
-from catboost import CatBoostRegressor
-regressor = CatBoostRegressor(
-    iterations=1000,
-    loss_function='Poisson',  # No log transform needed
-    cat_features=categorical_cols,
-    random_state=42
-)
-# Train only on positive samples
-X_train_pos = X_train[y_train > 0]
-y_train_pos = y_train[y_train > 0]
-regressor.fit(X_train_pos, y_train_pos)
-```
-
-### 3. API Processing Chain with Two-Stage Prediction
-```python
-# Four-step processing pattern
-raw_data = validate_request(request)
-classified_data = classify_and_transform(raw_data)
-
-# Two-stage prediction
-selection_probs = classifier.predict_proba(classified_data)[:, 1]
-expected_counts = regressor.predict(classified_data)
-final_predictions = selection_probs * expected_counts
-
-# Add confidence intervals
-predictions = add_confidence_intervals(final_predictions)
-```
-
-### 4. Enhanced Feature Engineering
-```python
-# New shop-level share features
-df['product_share_in_shop'] = (
-    df.groupby(['employee_shop', 'product_id'])['selection_count'].transform('sum') /
-    df.groupby('employee_shop')['selection_count'].transform('sum')
-)
-
-# Rank features
-df['product_rank_in_shop'] = df.groupby('employee_shop')['selection_count'].rank(
-    method='dense', ascending=False
-)
-
-# Interaction hashing (memory efficient)
-from sklearn.feature_extraction import FeatureHasher
-hasher = FeatureHasher(n_features=32, input_type='string')
-interactions = hasher.transform(
-    df[['employee_branch', 'product_main_category']].apply(
-        lambda x: f"{x[0]}_{x[1]}", axis=1
-    )
-)
-```
-
-## Scalability Considerations
-
-- **Stateless API design** for horizontal scaling
-- **Modular component structure** for independent scaling
-- **Caching strategy** for model predictions
-- **Async processing** for batch operations
-- **Database abstraction** for storage flexibility
-
-## Deployment Architecture (Future)
-
-- **Containerized services** using Docker
-- **API Gateway** for request routing
-- **Load balancing** for high availability
-- **Model versioning** for A/B testing
-- **Monitoring and logging** for operational visibility
+## Scalability Considerations (Future)
+- Current focus is on correcting core logic.
+- Future considerations might include more robust data storage than CSVs, caching strategies for features/predictions, and asynchronous processing for heavy tasks.
