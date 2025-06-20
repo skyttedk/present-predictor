@@ -23,8 +23,9 @@ The system is designed as a machine learning-powered demand prediction engine th
 2.  **Data Processing & Classification:**
     *   Historical data is preprocessed and aggregated to identify patterns.
     *   For new prediction requests, input data (gift descriptions, employee names) is classified into structured features (e.g., gift attributes via OpenAI, employee gender via `gender_guesser`).
-3.  **Prediction Generation:** A machine learning model (currently CatBoost Regressor) uses the processed features to predict the expected quantity for each gift in the given context.
-4.  **API Output:** The predictions are delivered via a RESTful API, providing actionable demand forecasts.
+3.  **Prediction Generation:** A machine learning model (CatBoost Regressor) generates a "popularity score" for each gift, weighted by employee gender ratios.
+4.  **Prediction Normalization:** These scores are then normalized across all available gifts to ensure the final sum of `expected_qty` matches the total number of employees.
+5.  **API Output:** The final, normalized predictions are delivered via a RESTful API.
 
 ### API Flow (Conceptual):
 
@@ -48,8 +49,9 @@ The system is designed as a machine learning-powered demand prediction engine th
     *   Gifts are classified into attributes (e.g., `itemMainCategory`, `color`, `brand`).
     *   Employee names are processed to determine gender.
     *   Shop-specific features and historical context are resolved.
-3.  **Prediction by ML Model:** The model predicts quantities based on the enriched feature set.
-4.  **API Response:**
+3.  **Prediction by ML Model (Raw Scores):** The model calculates a gender-weighted popularity score for each gift.
+4.  **Normalization:** The raw scores are summed, and each individual score is normalized against the total to ensure the final sum of `expected_qty` equals `total_employees`.
+5.  **API Response:**
     ```json
     [
       {"product_id" : "P101", "expected_qty" : 25, "confidence_score": 0.85},

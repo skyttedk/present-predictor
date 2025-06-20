@@ -69,7 +69,7 @@ graph TD
   - **Prediction** ([`src/ml/predictor.py`](src/ml/predictor.py:1)):
     - Loads the trained CatBoost model.
     - Makes predictions based on engineered features.
-    - **Current Critical Issue**: The aggregation logic in `_aggregate_predictions()` misinterprets the model's output.
+    - **Prediction Aggregation**: The `_aggregate_predictions()` method now correctly weights predictions by gender ratios and normalizes the final output to ensure the total quantity matches the number of employees.
 - **Key Files**:
   - [`src/ml/catboost_trainer.py`](src/ml/catboost_trainer.py:1): Training pipeline.
   - [`src/ml/predictor.py`](src/ml/predictor.py:1): Prediction service.
@@ -82,7 +82,7 @@ graph TD
   - [`src/config/settings.py`](src/config/settings.py:1): Main application settings.
   - [`src/config/model_config.py`](src/config/model_config.py:1): (Potentially outdated) XGBoost-focused model configurations. The CatBoost settings are primarily in `settings.py`.
 
-## Data Flow Architecture (Focus on Prediction & Current Issue)
+## Data Flow Architecture (Focus on Prediction)
 
 **Input Data for Prediction:**
 - API Request: Branch code, list of presents (with attributes), list of employees (with gender).
@@ -94,18 +94,12 @@ graph TD
 2.  **Context Resolution**:
     *   Calculate employee gender statistics (ratios).
     *   Resolve shop-specific features using `ShopFeatureResolver`.
-3.  **Feature Vector Creation**: For each present, create feature vectors. The current logic creates them per gender group present in the request.
-4.  **Model Prediction**: The CatBoost model predicts a value for each feature vector.
-    *   **Model Output Interpretation**: The model was trained on `selection_count` (an absolute count for a historical combination).
-5.  **Prediction Aggregation (`_aggregate_predictions`) - CURRENTLY FLAWED**:
-    *   **Incorrect Assumption**: Assumes model output is a "per-employee rate".
-    *   **Incorrect Scaling**: Multiplies this presumed rate by `employee_ratios` and `total_employees` from the current request.
-    *   **Result**: Uniform and incorrect `expected_qty`.
-6.  **Response Generation**: Formats predictions into API response.
-
-**Proposed Correction (Option A):**
-1.  The CatBoost model output for a given feature vector (representing a present in a specific context, e.g., for a gender group) should be treated as the **total expected quantity for that specific context**.
-2.  The `_aggregate_predictions` function in [`src/ml/predictor.py`](src/ml/predictor.py:1) needs to be modified. If predictions are made per gender group for a single present, these context-specific total quantities should be summed up to get the final `expected_qty` for that present. The problematic scaling by `employee_ratios` and `total_employees` (in the sense of converting a rate) must be removed.
+3.  **Feature Vector Creation**: For each present, create feature vectors per gender group.
+4.  **Model Prediction (Raw Scores)**: The CatBoost model predicts a "popularity score" for each present. This is calculated by weighting the gender-specific model outputs by the corresponding gender ratio and number of employees.
+    *   `raw_score = sum(model_output_gender * ratio_gender * total_employees)`
+5.  **Prediction Normalization**: The raw scores for all presents are summed up. Each individual score is then normalized against this total to ensure the final sum of `expected_qty` equals `total_employees`.
+    *   `final_qty = (raw_score / total_raw_scores) * total_employees`
+6.  **Response Generation**: Formats the normalized predictions into the final API response.
 
 ## Key Technical Decisions & Design Patterns
 

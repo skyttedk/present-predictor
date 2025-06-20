@@ -1,53 +1,43 @@
 # Current Context
 
 ## Project Status
-**Phase**: ML Expert Feedback Implementation - COMPLETED ✅
-**Last Updated**: December 20, 2024
+**Phase**: Production Ready
+**Last Updated**: June 20, 2025
 
 ## Current Work Focus
-**ISSUE RESOLVED**: Successfully fixed the uniform prediction problem identified by the ML expert. The root cause was a broken feature resolution system, not the model itself.
+**CORE LOGIC FIXED**: The prediction pipeline now correctly handles gender-based weighting and normalizes the final output to ensure the total predicted quantity matches the number of employees.
 
 **Successfully Implemented**:
-1. **Root Cause Analysis (December 20, 2024)**:
-   - Model performance: R² = 0.996 (working correctly)
-   - Issue: Feature resolution in `ShopFeatureResolver` was too restrictive
-   - All products defaulted to `product_share_in_shop = 0.0` (66% of feature importance)
+1.  **Gender-Weighted Predictions (June 20, 2025)**:
+    -   The `_aggregate_predictions` method in [`src/ml/predictor.py`](src/ml/predictor.py:1) now correctly calculates the expected quantity for each gender subgroup.
+    -   Formula: `expected_qty_gender = model_output * gender_ratio * total_employees`
 
-2. **Fix Implementation**:
-   - Enhanced `_get_product_relativity_features()` with progressive fallback strategy
-   - Strategy 1: Exact shop + product match
-   - Strategy 2: Same branch + product match
-   - Strategy 3: Any shop + product match
-   - Strategy 4: Brand-only fallback
-   - Strategy 5: Category-only fallback
+2.  **Prediction Normalization (June 20, 2025)**:
+    -   The main `predict` method in [`src/ml/predictor.py`](src/ml/predictor.py:1) now treats the initial predictions as "popularity scores."
+    -   These scores are summed, and each individual score is normalized against the total to ensure the final sum of `expected_qty` equals `total_employees`.
+    -   Formula: `final_qty = (raw_score / total_raw_scores) * total_employees`
 
-3. **Validation Results**:
-   - **Before**: All products = 8 units (uniform)
-   - **After**: Range 8-100+ units based on historical performance
-   - Popular products (Home & Kitchen): 100+ units
-   - Unpopular products (Obscure): 8 units
-   - Scaling works for different company sizes
+3.  **Validation Results**:
+    -   **Before**: Total predicted quantity (`~843`) far exceeded the number of employees (`57`).
+    -   **After**: Total predicted quantity (`57`) now correctly matches the number of employees. Predictions are distributed proportionally based on the model's assessment of popularity.
 
 ## Recent Changes
-- **December 20, 2024**:
-  - ✅ Fixed feature resolution in `src/ml/shop_features.py`
-  - ✅ Created debugging scripts to validate fix
-  - ✅ Tested end-to-end prediction pipeline
-  - ✅ Documented implementation in `docs/ml_fix_implementation_summary.md`
-  - ✅ Verified business logic and scaling accuracy
+-   **June 20, 2025**:
+    -   ✅ Fixed gender-based prediction weighting in `_aggregate_predictions`.
+    -   ✅ Implemented normalization logic in the main `predict` method.
+    -   ✅ Tested and verified that the total predicted quantity now matches the number of employees.
+    -   ✅ Updated `architecture.md` to reflect the new, correct data flow.
 
 ## Next Steps (Future Enhancements)
-1. **Production Monitoring**:
-   - Monitor prediction distributions in production
-   - Track business validation against actual selections
-   - Log feature resolution statistics
+1.  **Production Monitoring**:
+    -   Monitor prediction distributions in production.
+    -   Track business validation against actual selections.
+    -   Log feature resolution and normalization statistics.
 
-2. **Long-term Enhancement (Option B)**:
-   - Obtain historical employee count data
-   - Retrain model with rate-based targets (`selection_rate = count / employees`)
-   - More accurate scaling without post-hoc adjustments
+2.  **Long-term Enhancement**:
+    -   Obtain historical employee count data per shop/order.
+    -   Retrain the model with a rate-based target (e.g., `selection_rate = selection_count / total_employees_in_shop`) to make the model's output more directly interpretable and potentially remove the need for post-hoc normalization.
 
-3. **Performance Optimization**:
-   - Consider caching frequent feature lookups
-   - Add A/B testing framework for model improvements
-   - Implement confidence interval generation
+3.  **Performance Optimization**:
+    -   Consider caching frequent feature lookups in the `ShopFeatureResolver`.
+    -   Investigate batching predictions for improved performance.

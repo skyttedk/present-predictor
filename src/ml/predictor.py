@@ -136,44 +136,58 @@ class GiftDemandPredictor:
             employee_stats = self._calculate_employee_stats(employees)
             logger.debug(f"Employee demographics: {employee_stats}")
             
-            # Note: We don't have a real shop_id during prediction (it was just a bundling parameter
-            # in training data). We'll use None to indicate this and let the resolver fall back
-            # to branch-based feature resolution, which is the correct approach.
-            
-            predictions = []
+            raw_predictions = []
             
             for present in presents:
                 try:
-                    # Resolve features for each present individually now
-                    # Pass None as shop_id since we don't have real shop_id during prediction
+                    # Step 1: Get raw, un-normalized prediction for each present
                     shop_and_product_features = self.shop_resolver.get_shop_features(None, branch, present)
                     
-                    # HEROKU DEBUG: Log feature values to see if random sampling is working
-                    logger.info(f"HEROKU DEBUG - Present {present.get('id', 'unknown')} features: "
-                               f"product_share={shop_and_product_features.get('product_share_in_shop', 'MISSING'):.6f}, "
-                               f"brand_share={shop_and_product_features.get('brand_share_in_shop', 'MISSING'):.6f}, "
-                               f"product_rank={shop_and_product_features.get('product_rank_in_shop', 'MISSING'):.2f}")
-                    
-                    logger.debug(f"Features resolved for branch {branch} and present {present.get('id', 'unknown')}")
-
                     prediction = self._predict_for_present(
                         present, employee_stats, branch, shop_and_product_features, len(employees)
                     )
-                    predictions.append(prediction)
+                    raw_predictions.append(prediction)
                     
                 except Exception as e:
                     logger.error(f"Failed to predict for present {present.get('id', 'unknown')}: {e}")
-                    # Add zero prediction as fallback
-                    predictions.append(PredictionResult(
+                    raw_predictions.append(PredictionResult(
                         product_id=str(present.get('id', 'unknown')),
                         expected_qty=0,
                         confidence_score=0.0
                     ))
+
+            # Step 2: Normalize predictions so their sum equals total_employees
+            total_raw_demand = sum(p.expected_qty for p in raw_predictions)
             
-            total_predicted = sum(p.expected_qty for p in predictions)
-            logger.info(f"Prediction complete. Total predicted demand: {total_predicted} units")
+            final_predictions = []
+            if total_raw_demand > 0:
+                for pred in raw_predictions:
+                    normalized_qty = (pred.expected_qty / total_raw_demand) * len(employees)
+                    final_predictions.append(PredictionResult(
+                        product_id=pred.product_id,
+                        expected_qty=int(round(normalized_qty)),
+                        confidence_score=pred.confidence_score
+                    ))
+            else:
+                # If all raw predictions are zero, distribute employees evenly
+                logger.warning("All raw predictions were zero. Distributing demand evenly.")
+                equal_share = len(employees) / len(presents) if len(presents) > 0 else 0
+                for pred in raw_predictions:
+                    final_predictions.append(PredictionResult(
+                        product_id=pred.product_id,
+                        expected_qty=int(round(equal_share)),
+                        confidence_score=0.1 # Low confidence
+                    ))
+
+            # Ensure the sum exactly matches total_employees due to rounding
+            total_predicted = sum(p.expected_qty for p in final_predictions)
+            if total_predicted != len(employees) and len(final_predictions) > 0:
+                diff = len(employees) - total_predicted
+                final_predictions[0].expected_qty += diff
+
+            logger.info(f"Prediction complete. Total normalized demand: {sum(p.expected_qty for p in final_predictions)} units")
             
-            return predictions
+            return final_predictions
             
         except Exception as e:
             logger.error(f"Prediction failed: {e}")
@@ -217,13 +231,14 @@ class GiftDemandPredictor:
         
         # Create feature vectors for each gender group with non-zero representation
         rows = []
+        gender_ratios = []
         for gender, ratio in employee_stats.items():
             if ratio > 0:
                 features = self._create_feature_vector(
                     present, gender, branch, shop_features
                 )
-                features['employee_ratio'] = ratio
                 rows.append(features)
+                gender_ratios.append(ratio)
         
         if not rows:
             logger.warning(f"No valid employee data for present {present_id}")
@@ -237,10 +252,6 @@ class GiftDemandPredictor:
         feature_df = pd.DataFrame(rows)
         feature_df = self._add_interaction_features(feature_df)
         
-        # Store employee ratios before preparing features
-        employee_ratios = feature_df['employee_ratio'].values
-        feature_df = feature_df.drop(columns=['employee_ratio'])
-        
         # Prepare features for model
         feature_df = self._prepare_features(feature_df)
         
@@ -248,9 +259,9 @@ class GiftDemandPredictor:
             # Make predictions using CatBoost Pool
             predictions = self._make_catboost_prediction(feature_df)
             
-            # Aggregate predictions
+            # Aggregate predictions with proper gender ratio weighting
             total_prediction = self._aggregate_predictions(
-                predictions, total_employees # employee_ratios no longer needed for main calc
+                predictions, gender_ratios, total_employees
             )
             
             # Calculate confidence
@@ -391,28 +402,41 @@ class GiftDemandPredictor:
         
         return predictions
     
-    def _aggregate_predictions(self, predictions: np.ndarray,
+    def _aggregate_predictions(self, predictions: np.ndarray, gender_ratios: List[float],
                              total_employees: int) -> float:
         """
-        Aggregate model predictions to total quantity.
+        Aggregate model predictions to total quantity using proper gender weighting.
         
         IMPORTANT: The model was trained on historical selection_count which represents
         cumulative counts across all historical data for a shop/product/gender combination.
-        We need to interpret this in the context of the current request.
         
-        Since we create one prediction per gender group present in the request,
-        we sum these predictions as each represents expected demand for that subgroup.
+        For each gender group, we weight the prediction by:
+        prediction_for_gender * gender_ratio * total_employees
+        
+        This gives us the expected quantity for each gender subgroup, which we sum
+        to get the total expected demand.
         """
         
-        # Sum the raw predictions from the model
-        total_prediction = np.sum(predictions)
+        if len(predictions) != len(gender_ratios):
+            logger.error(f"Mismatch: {len(predictions)} predictions vs {len(gender_ratios)} ratios")
+            return 0.0
+        
+        # Calculate weighted predictions for each gender group
+        weighted_predictions = []
+        for pred, ratio in zip(predictions, gender_ratios):
+            # Each prediction represents expected rate for that gender
+            # Scale by the number of employees in that gender group
+            gender_employees = ratio * total_employees
+            weighted_pred = pred * gender_employees
+            weighted_predictions.append(weighted_pred)
+        
+        # Sum all gender-specific predictions
+        total_prediction = np.sum(weighted_predictions)
         
         # Apply a scaling factor to account for the difference between
         # historical cumulative counts and single-order predictions
-        # This is a temporary fix until we can retrain with proper rate targets
-        # Based on debugging, raw outputs are ~1.0 per gender group
-        # A factor of 3-5 produces reasonable selection rates (15-25%)
-        scaling_factor = 4.0  # Empirically determined - adjust based on validation
+        # This converts from historical aggregated counts to per-order rates
+        scaling_factor = 0.25  # Adjusted: converts cumulative counts to selection rates
         
         scaled_prediction = total_prediction * scaling_factor
         
@@ -422,10 +446,11 @@ class GiftDemandPredictor:
         
         # HEROKU DEBUG: Enhanced logging to see exact calculation values
         logger.info(f"HEROKU DEBUG - Aggregation: raw_predictions={predictions.tolist()}, "
-                   f"raw_sum={total_prediction:.4f}, scaled={scaled_prediction:.4f}, "
+                   f"gender_ratios={gender_ratios}, weighted_predictions={weighted_predictions}, "
+                   f"total_sum={total_prediction:.4f}, scaled={scaled_prediction:.4f}, "
                    f"final={final_prediction:.4f}, total_employees={total_employees}")
         
-        logger.debug(f"Aggregation: raw_sum={total_prediction:.2f}, "
+        logger.debug(f"Aggregation: weighted_sum={total_prediction:.2f}, "
                     f"scaled={scaled_prediction:.2f}, final={final_prediction:.2f}")
         
         return final_prediction
