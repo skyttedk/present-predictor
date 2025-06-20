@@ -12,6 +12,7 @@ from sklearn.feature_extraction import FeatureHasher
 from typing import List, Dict, Optional
 import logging
 import os
+import pickle
 
 from .shop_features import ShopFeatureResolver
 from ..api.schemas.responses import PredictionResult
@@ -34,6 +35,8 @@ class GiftDemandPredictor:
         self.model = None
         self.shop_resolver = None
         self.hasher = FeatureHasher(n_features=10, input_type='string')
+        
+        self.numeric_medians: Dict[str, float] = {} # Initialize numeric_medians
         
         # Feature configuration matching training pipeline
         self.expected_columns = [
@@ -64,18 +67,42 @@ class GiftDemandPredictor:
         logger.info("GiftDemandPredictor initialized successfully")
     
     def _load_model(self):
-        """Load CatBoost model with error handling"""
+        """Load CatBoost model and associated metadata (including numeric_medians)"""
         try:
             if not os.path.exists(self.model_path):
-                raise FileNotFoundError(f"Model not found at {self.model_path}")
+                raise FileNotFoundError(f"Model file not found at {self.model_path}")
             
             logger.info(f"Loading CatBoost model from {self.model_path}")
             self.model = CatBoostRegressor()
             self.model.load_model(self.model_path)
-            logger.info("Model loaded successfully")
+            logger.info("Model loaded successfully.")
+
+            # Load metadata, specifically numeric_medians
+            model_dir = os.path.dirname(self.model_path)
+            metadata_path = os.path.join(model_dir, 'model_metadata.pkl')
             
+            if not os.path.exists(metadata_path):
+                logger.warning(f"Model metadata file not found at {metadata_path}. Numeric medians will be empty.")
+                self.numeric_medians = {}
+            else:
+                logger.info(f"Loading model metadata from {metadata_path}")
+                with open(metadata_path, 'rb') as f:
+                    metadata = pickle.load(f)
+                self.numeric_medians = metadata.get('numeric_feature_medians', {})
+                if not self.numeric_medians:
+                    logger.warning("Numeric medians not found or empty in metadata.")
+                else:
+                    logger.info(f"Numeric medians loaded successfully: {list(self.numeric_medians.keys())}")
+
+        except FileNotFoundError as e:
+            logger.error(f"Error loading model/metadata: {e}")
+            raise
         except Exception as e:
-            logger.error(f"Failed to load model: {e}")
+            logger.error(f"An unexpected error occurred while loading model/metadata: {e}")
+            # Fallback for numeric_medians if any other error occurs during loading
+            if not hasattr(self, 'numeric_medians') or self.numeric_medians is None:
+                 self.numeric_medians = {}
+                 logger.warning("numeric_medians initialized to empty due to an error during loading.")
             raise
     
     def _initialize_shop_resolver(self, historical_data_path: Optional[str]):
