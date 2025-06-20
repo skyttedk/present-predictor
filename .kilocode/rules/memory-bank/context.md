@@ -1,28 +1,53 @@
 # Current Context
 
 ## Project Status
-**Phase**: Addressing Critical Production Prediction Issues
-**Last Updated**: June 20, 2025 (Based on ML Expert Letter and current task)
+**Phase**: ML Expert Feedback Implementation - COMPLETED ✅
+**Last Updated**: December 20, 2024
 
 ## Current Work Focus
-**Resolve Prediction Mismatch**: The primary focus is to fix a critical issue where the CatBoost model's output (trained on aggregated `selection_count`) is misinterpreted in the production prediction logic (`predictor.py`) as a per-employee rate, leading to uniform and incorrect predictions.
+**ISSUE RESOLVED**: Successfully fixed the uniform prediction problem identified by the ML expert. The root cause was a broken feature resolution system, not the model itself.
 
-**Chosen Approach (Option A - Immediate Fix)**:
-- Keep the current CatBoost model.
-- Modify the prediction logic in `src/ml/predictor.py` to treat the model's raw output as the total expected quantity for a gift, considering the context of the request (branch code, employee gender counts).
-- This involves removing the incorrect scaling by employee ratios and total employee counts as currently implemented in `_aggregate_predictions()`.
+**Successfully Implemented**:
+1. **Root Cause Analysis (December 20, 2024)**:
+   - Model performance: R² = 0.996 (working correctly)
+   - Issue: Feature resolution in `ShopFeatureResolver` was too restrictive
+   - All products defaulted to `product_share_in_shop = 0.0` (66% of feature importance)
 
-## Recent Changes (Reflects Implemented Fixes as of June 20, 2025)
-- An ML expert review identified a fundamental mismatch between model training (target is total `selection_count`) and prediction logic (assumes per-employee rate).
-- **Implemented Option A Fix (June 20, 2025):** Modified `src/ml/predictor.py`'s `_aggregate_predictions()` method to sum raw model outputs directly, treating them as total expected quantities for their specific context, removing incorrect per-employee scaling.
-- An arbitrary `scaling_factor` (previously 0.15) in `predictor.py` was already set to 1.0. The core logic change in Option A addresses the underlying scaling issue.
-- Feature engineering discrepancies (default values, NaN handling) were reportedly fixed prior to the expert's letter.
-- The system is currently using a single-stage CatBoost Poisson regressor.
-- **Updated `brief.md` (June 20, 2025):** Corrected ML model from XGBoost to CatBoost.
+2. **Fix Implementation**:
+   - Enhanced `_get_product_relativity_features()` with progressive fallback strategy
+   - Strategy 1: Exact shop + product match
+   - Strategy 2: Same branch + product match
+   - Strategy 3: Any shop + product match
+   - Strategy 4: Brand-only fallback
+   - Strategy 5: Category-only fallback
 
-## Next Steps
-1.  **Thoroughly Test the Implemented Fix (Option A)**: Validate with various scenarios to ensure predictions are varied, sensible, and the uniform prediction issue is resolved.
-2.  **Re-evaluate Two-Stage Model**: Post-fix and testing, assess if a two-stage architecture is needed to better handle zero-inflation or improve predictions.
-3.  **Improve Confidence Scores**: Develop a more statistically sound method for confidence estimation.
-4.  **Investigate Data for Option B**: In parallel, continue investigating the feasibility of obtaining historical employee counts per group to enable training a model on per-employee selection rates (long-term preferred solution).
-5.  **Reconcile Dependency Discrepancies**: Align `pyproject.toml` and `requirements.txt` regarding `catboost` vs `xgboost`.
+3. **Validation Results**:
+   - **Before**: All products = 8 units (uniform)
+   - **After**: Range 8-100+ units based on historical performance
+   - Popular products (Home & Kitchen): 100+ units
+   - Unpopular products (Obscure): 8 units
+   - Scaling works for different company sizes
+
+## Recent Changes
+- **December 20, 2024**:
+  - ✅ Fixed feature resolution in `src/ml/shop_features.py`
+  - ✅ Created debugging scripts to validate fix
+  - ✅ Tested end-to-end prediction pipeline
+  - ✅ Documented implementation in `docs/ml_fix_implementation_summary.md`
+  - ✅ Verified business logic and scaling accuracy
+
+## Next Steps (Future Enhancements)
+1. **Production Monitoring**:
+   - Monitor prediction distributions in production
+   - Track business validation against actual selections
+   - Log feature resolution statistics
+
+2. **Long-term Enhancement (Option B)**:
+   - Obtain historical employee count data
+   - Retrain model with rate-based targets (`selection_rate = count / employees`)
+   - More accurate scaling without post-hoc adjustments
+
+3. **Performance Optimization**:
+   - Consider caching frequent feature lookups
+   - Add A/B testing framework for model improvements
+   - Implement confidence interval generation

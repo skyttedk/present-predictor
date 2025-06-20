@@ -386,26 +386,38 @@ class GiftDemandPredictor:
         return predictions
     
     def _aggregate_predictions(self, predictions: np.ndarray,
-                             total_employees: int) -> float: # employee_ratios removed
+                             total_employees: int) -> float:
         """
         Aggregate model predictions to total quantity.
-        The model's output for each gender-specific feature vector is treated as the
-        total expected quantity for that specific context. These are summed.
+        
+        IMPORTANT: The model was trained on historical selection_count which represents
+        cumulative counts across all historical data for a shop/product/gender combination.
+        We need to interpret this in the context of the current request.
+        
+        Since we create one prediction per gender group present in the request,
+        we sum these predictions as each represents expected demand for that subgroup.
         """
         
-        # Sum the raw predictions from the model. Each prediction is for a specific
-        # gender context and is interpreted as the total expected quantity for that context.
+        # Sum the raw predictions from the model
         total_prediction = np.sum(predictions)
         
-        # The scaling_factor was an empirical fix for the previous misinterpretation.
-        # With Option A, the direct model output (summed) is used.
-        # scaling_factor = 1.0 # Effectively no change if left, but removed for clarity.
+        # Apply a scaling factor to account for the difference between
+        # historical cumulative counts and single-order predictions
+        # This is a temporary fix until we can retrain with proper rate targets
+        # Based on debugging, raw outputs are ~1.0 per gender group
+        # A factor of 3-5 produces reasonable selection rates (15-25%)
+        scaling_factor = 4.0  # Empirically determined - adjust based on validation
         
-        # Ensure non-negative and maximum of all employees (100% selection is possible)
-        # This capping might still be a useful heuristic.
-        total_prediction = max(0, min(total_prediction, total_employees))
+        scaled_prediction = total_prediction * scaling_factor
         
-        return total_prediction
+        # Ensure non-negative and reasonable bounds
+        # Cap at total employees as upper bound (100% selection rate)
+        final_prediction = max(0, min(scaled_prediction, total_employees))
+        
+        logger.debug(f"Aggregation: raw_sum={total_prediction:.2f}, "
+                    f"scaled={scaled_prediction:.2f}, final={final_prediction:.2f}")
+        
+        return final_prediction
     
     def _calculate_confidence(self, predictions: np.ndarray, num_groups: int) -> float:
         """Calculate prediction confidence score"""

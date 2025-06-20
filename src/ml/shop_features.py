@@ -228,7 +228,7 @@ class ShopFeatureResolver:
         return final_features
 
     def _get_product_relativity_features(self, shop_id: str, branch_code: str, present_info: Dict) -> Dict:
-        """Looks up product-specific features from the loaded relativity table."""
+        """Looks up product-specific features from the loaded relativity table with improved fallback."""
         
         default_relativity = {
             'product_share_in_shop': 0.0,
@@ -238,47 +238,78 @@ class ShopFeatureResolver:
         }
 
         if self.product_relativity_lookup.empty:
+            logger.debug("Product relativity lookup is empty.")
             return default_relativity
 
-        # Create a query based on the present's info
-        # The columns must match those used in the training script's grouping_cols
-        query_conditions = (
+        # Strategy 1: Try exact shop + product match
+        exact_shop_conditions = (
             (self.product_relativity_lookup['employee_shop'] == shop_id) &
-            (self.product_relativity_lookup['employee_branch'] == branch_code) &
             (self.product_relativity_lookup['product_main_category'] == present_info.get('item_main_category', 'NONE')) &
-            (self.product_relativity_lookup['product_sub_category'] == present_info.get('item_sub_category', 'NONE')) &
-            (self.product_relativity_lookup['product_brand'] == present_info.get('brand', 'NONE')) &
-            (self.product_relativity_lookup['product_color'] == present_info.get('color', 'NONE')) &
-            (self.product_relativity_lookup['product_durability'] == present_info.get('durability', 'NONE')) &
-            (self.product_relativity_lookup['product_target_gender'] == present_info.get('target_demographic', 'NONE')) &
-            (self.product_relativity_lookup['product_utility_type'] == present_info.get('utility_type', 'NONE')) &
-            (self.product_relativity_lookup['product_type'] == present_info.get('usage_type', 'NONE'))
+            (self.product_relativity_lookup['product_brand'] == present_info.get('brand', 'NONE'))
         )
         
-        # We need to handle gender separately as it's not part of the present_info
-        # For now, we will average the features across genders if multiple matches are found.
-        
-        matched_rows = self.product_relativity_lookup[query_conditions]
-
+        matched_rows = self.product_relativity_lookup[exact_shop_conditions]
         if not matched_rows.empty:
-            # Average the results in case of multiple gender matches for the same product definition
-            # This is a reasonable heuristic for inference time.
             avg_features = matched_rows[['product_share_in_shop', 'brand_share_in_shop', 'product_rank_in_shop', 'brand_rank_in_shop']].mean().to_dict()
-            logger.debug(f"Found and averaged {len(matched_rows)} relativity records for present.")
+            logger.debug(f"Found exact shop match: {len(matched_rows)} records for shop {shop_id}")
             return avg_features
-        else:
-            logger.debug(f"No specific relativity record found for present. Using defaults.")
-            # Fallback: try to find features for the brand in that shop
-            brand_in_shop = self.product_relativity_lookup[
-                (self.product_relativity_lookup['employee_shop'] == shop_id) &
-                (self.product_relativity_lookup['product_brand'] == present_info.get('brand', 'NONE'))
-            ]
-            if not brand_in_shop.empty:
-                avg_brand_features = brand_in_shop[['brand_share_in_shop', 'brand_rank_in_shop']].mean().to_dict()
-                logger.debug(f"Found brand-level fallback for relativity features.")
-                return {**default_relativity, **avg_brand_features}
-
-            return default_relativity
+        
+        # Strategy 2: Try same branch + product match (similar shops)
+        branch_conditions = (
+            (self.product_relativity_lookup['employee_branch'] == branch_code) &
+            (self.product_relativity_lookup['product_main_category'] == present_info.get('item_main_category', 'NONE')) &
+            (self.product_relativity_lookup['product_brand'] == present_info.get('brand', 'NONE'))
+        )
+        
+        matched_rows = self.product_relativity_lookup[branch_conditions]
+        if not matched_rows.empty:
+            avg_features = matched_rows[['product_share_in_shop', 'brand_share_in_shop', 'product_rank_in_shop', 'brand_rank_in_shop']].mean().to_dict()
+            logger.debug(f"Found branch match: {len(matched_rows)} records for branch {branch_code}")
+            return avg_features
+        
+        # Strategy 3: Try just product category + brand across all shops
+        product_conditions = (
+            (self.product_relativity_lookup['product_main_category'] == present_info.get('item_main_category', 'NONE')) &
+            (self.product_relativity_lookup['product_brand'] == present_info.get('brand', 'NONE'))
+        )
+        
+        matched_rows = self.product_relativity_lookup[product_conditions]
+        if not matched_rows.empty:
+            avg_features = matched_rows[['product_share_in_shop', 'brand_share_in_shop', 'product_rank_in_shop', 'brand_rank_in_shop']].mean().to_dict()
+            logger.debug(f"Found product match: {len(matched_rows)} records across all shops")
+            return avg_features
+        
+        # Strategy 4: Try just brand across all shops
+        brand_conditions = (
+            self.product_relativity_lookup['product_brand'] == present_info.get('brand', 'NONE')
+        )
+        
+        matched_rows = self.product_relativity_lookup[brand_conditions]
+        if not matched_rows.empty:
+            # Only use brand-related features, keep product features as default
+            brand_features = matched_rows[['brand_share_in_shop', 'brand_rank_in_shop']].mean().to_dict()
+            logger.debug(f"Found brand match: {len(matched_rows)} records for brand {present_info.get('brand', 'NONE')}")
+            return {
+                'product_share_in_shop': 0.0,
+                'brand_share_in_shop': brand_features.get('brand_share_in_shop', 0.0),
+                'product_rank_in_shop': 99.0,
+                'brand_rank_in_shop': brand_features.get('brand_rank_in_shop', 99.0)
+            }
+        
+        # Strategy 5: Try just category across all shops
+        category_conditions = (
+            self.product_relativity_lookup['product_main_category'] == present_info.get('item_main_category', 'NONE')
+        )
+        
+        matched_rows = self.product_relativity_lookup[category_conditions]
+        if not matched_rows.empty:
+            # Use average features for this category
+            category_features = matched_rows[['product_share_in_shop', 'brand_share_in_shop', 'product_rank_in_shop', 'brand_rank_in_shop']].mean().to_dict()
+            logger.debug(f"Found category match: {len(matched_rows)} records for category {present_info.get('item_main_category', 'NONE')}")
+            return category_features
+        
+        logger.debug(f"No specific relativity record found for present. Using defaults.")
+        return default_relativity
     
     def _average_shop_features(self, shop_ids: List[str]) -> Dict[str, any]:
         """Average features from multiple similar shops"""
