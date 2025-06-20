@@ -132,23 +132,21 @@ class GiftDemandPredictor:
         try:
             logger.info(f"Making predictions for {len(presents)} presents and {len(employees)} employees")
             
-            # Extract shop ID from branch (commonly first 4 digits)
-            shop_id = branch[:4] if len(branch) >= 4 else branch
-            
             # Calculate employee demographics
             employee_stats = self._calculate_employee_stats(employees)
             logger.debug(f"Employee demographics: {employee_stats}")
             
-            # Get shop features - This will now be done inside the loop for each present
-            # shop_features = self.shop_resolver.get_shop_features(shop_id, branch)
-            # logger.debug(f"Shop features resolved for shop {shop_id}")
+            # Note: We don't have a real shop_id during prediction (it was just a bundling parameter
+            # in training data). We'll use None to indicate this and let the resolver fall back
+            # to branch-based feature resolution, which is the correct approach.
             
             predictions = []
             
             for present in presents:
                 try:
                     # Resolve features for each present individually now
-                    shop_and_product_features = self.shop_resolver.get_shop_features(shop_id, branch, present)
+                    # Pass None as shop_id since we don't have real shop_id during prediction
+                    shop_and_product_features = self.shop_resolver.get_shop_features(None, branch, present)
                     
                     # HEROKU DEBUG: Log feature values to see if random sampling is working
                     logger.info(f"HEROKU DEBUG - Present {present.get('id', 'unknown')} features: "
@@ -156,10 +154,10 @@ class GiftDemandPredictor:
                                f"brand_share={shop_and_product_features.get('brand_share_in_shop', 'MISSING'):.6f}, "
                                f"product_rank={shop_and_product_features.get('product_rank_in_shop', 'MISSING'):.2f}")
                     
-                    logger.debug(f"Features resolved for shop {shop_id} and present {present.get('id', 'unknown')}")
+                    logger.debug(f"Features resolved for branch {branch} and present {present.get('id', 'unknown')}")
 
                     prediction = self._predict_for_present(
-                        present, employee_stats, shop_id, branch, shop_and_product_features, len(employees)
+                        present, employee_stats, branch, shop_and_product_features, len(employees)
                     )
                     predictions.append(prediction)
                     
@@ -209,8 +207,8 @@ class GiftDemandPredictor:
             for gender, count in gender_counts.items()
         }
     
-    def _predict_for_present(self, present: Dict, employee_stats: Dict[str, float], 
-                           shop_id: str, branch: str, shop_features: Dict, 
+    def _predict_for_present(self, present: Dict, employee_stats: Dict[str, float],
+                           branch: str, shop_features: Dict,
                            total_employees: int) -> PredictionResult:
         """Make prediction for a single present"""
         
@@ -222,7 +220,7 @@ class GiftDemandPredictor:
         for gender, ratio in employee_stats.items():
             if ratio > 0:
                 features = self._create_feature_vector(
-                    present, gender, shop_id, branch, shop_features
+                    present, gender, branch, shop_features
                 )
                 features['employee_ratio'] = ratio
                 rows.append(features)
@@ -272,13 +270,14 @@ class GiftDemandPredictor:
                 confidence_score=0.0
             )
     
-    def _create_feature_vector(self, present: Dict, employee_gender: str, 
-                             shop_id: str, branch: str, shop_features: Dict) -> Dict:
+    def _create_feature_vector(self, present: Dict, employee_gender: str,
+                             branch: str, shop_features: Dict) -> Dict:
         """Create feature vector for one present-employee combination"""
         
         # Base features matching training data structure
+        # Since we don't have a real shop_id during prediction, use branch code as placeholder
         features = {
-            'employee_shop': shop_id,
+            'employee_shop': branch,  # Use branch as shop placeholder
             'employee_branch': branch,
             'employee_gender': employee_gender,
             'product_main_category': present.get('item_main_category', 'NONE'),

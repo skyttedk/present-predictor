@@ -3,6 +3,10 @@ Shop Feature Resolver for ML Predictions
 
 This module handles shop-level feature resolution with fallback strategies
 for new shops without historical data, using branch codes to find similar shops.
+
+IMPORTANT: During prediction, we don't have access to real shop_id values since
+shop_id was just a bundling/batching parameter in the training dataset. The
+resolver correctly handles None shop_id and falls back to branch-based resolution.
 """
 
 import pandas as pd
@@ -188,12 +192,12 @@ class ShopFeatureResolver:
         }
         logger.info("Using hardcoded default features")
     
-    def get_shop_features(self, shop_id: str, branch_code: str, present_info: Dict) -> Dict[str, any]:
+    def get_shop_features(self, shop_id: Optional[str], branch_code: str, present_info: Dict) -> Dict[str, any]:
         """
         Get shop features with intelligent fallback, now including product-specific features.
         
         Args:
-            shop_id: Shop identifier (e.g., "2960")
+            shop_id: Shop identifier (e.g., "2960") or None if not available during prediction
             branch_code: Branch/industry code (e.g., "621000")
             present_info: Dictionary of the present's attributes to look up relativity features.
             
@@ -204,7 +208,7 @@ class ShopFeatureResolver:
         
         # --- Step 1: Get base shop-level features ---
         base_shop_features = {}
-        if shop_id in self.historical_features:
+        if shop_id and shop_id in self.historical_features:
             logger.debug(f"Found direct features for shop {shop_id}")
             base_shop_features = self.historical_features[shop_id].copy()
         elif branch_code in self.branch_mapping:
@@ -216,7 +220,7 @@ class ShopFeatureResolver:
                 logger.debug(f"Using global default features for shop {shop_id} as no similar shops found.")
                 base_shop_features = self.global_defaults.copy()
         else:
-            logger.debug(f"Using global default features for shop {shop_id}")
+            logger.debug(f"Using global default features for branch {branch_code}")
             base_shop_features = self.global_defaults.copy()
 
         # --- Step 2: Get product-specific relativity features ---
@@ -227,7 +231,7 @@ class ShopFeatureResolver:
         
         return final_features
 
-    def _get_product_relativity_features(self, shop_id: str, branch_code: str, present_info: Dict) -> Dict:
+    def _get_product_relativity_features(self, shop_id: Optional[str], branch_code: str, present_info: Dict) -> Dict:
         """Looks up product-specific features from the loaded relativity table with improved fallback."""
         
         default_relativity = {
@@ -261,18 +265,19 @@ class ShopFeatureResolver:
                 logger.debug(f"Used random sampling from {sample_size} popular products for NONE classification")
                 return sampled_features
 
-        # Strategy 1: Try exact shop + product match
-        exact_shop_conditions = (
-            (self.product_relativity_lookup['employee_shop'] == shop_id) &
-            (self.product_relativity_lookup['product_main_category'] == present_info.get('item_main_category', 'NONE')) &
-            (self.product_relativity_lookup['product_brand'] == present_info.get('brand', 'NONE'))
-        )
-        
-        matched_rows = self.product_relativity_lookup[exact_shop_conditions]
-        if not matched_rows.empty:
-            avg_features = matched_rows[['product_share_in_shop', 'brand_share_in_shop', 'product_rank_in_shop', 'brand_rank_in_shop']].mean().to_dict()
-            logger.debug(f"Found exact shop match: {len(matched_rows)} records for shop {shop_id}")
-            return avg_features
+        # Strategy 1: Try exact shop + product match (only if shop_id is available)
+        if shop_id:
+            exact_shop_conditions = (
+                (self.product_relativity_lookup['employee_shop'] == shop_id) &
+                (self.product_relativity_lookup['product_main_category'] == present_info.get('item_main_category', 'NONE')) &
+                (self.product_relativity_lookup['product_brand'] == present_info.get('brand', 'NONE'))
+            )
+            
+            matched_rows = self.product_relativity_lookup[exact_shop_conditions]
+            if not matched_rows.empty:
+                avg_features = matched_rows[['product_share_in_shop', 'brand_share_in_shop', 'product_rank_in_shop', 'brand_rank_in_shop']].mean().to_dict()
+                logger.debug(f"Found exact shop match: {len(matched_rows)} records for shop {shop_id}")
+                return avg_features
         
         # Strategy 2: Try same branch + product match (similar shops)
         branch_conditions = (
