@@ -149,6 +149,13 @@ class GiftDemandPredictor:
                 try:
                     # Resolve features for each present individually now
                     shop_and_product_features = self.shop_resolver.get_shop_features(shop_id, branch, present)
+                    
+                    # HEROKU DEBUG: Log feature values to see if random sampling is working
+                    logger.info(f"HEROKU DEBUG - Present {present.get('id', 'unknown')} features: "
+                               f"product_share={shop_and_product_features.get('product_share_in_shop', 'MISSING'):.6f}, "
+                               f"brand_share={shop_and_product_features.get('brand_share_in_shop', 'MISSING'):.6f}, "
+                               f"product_rank={shop_and_product_features.get('product_rank_in_shop', 'MISSING'):.2f}")
+                    
                     logger.debug(f"Features resolved for shop {shop_id} and present {present.get('id', 'unknown')}")
 
                     prediction = self._predict_for_present(
@@ -413,6 +420,11 @@ class GiftDemandPredictor:
         # Ensure non-negative and reasonable bounds
         # Cap at total employees as upper bound (100% selection rate)
         final_prediction = max(0, min(scaled_prediction, total_employees))
+        
+        # HEROKU DEBUG: Enhanced logging to see exact calculation values
+        logger.info(f"HEROKU DEBUG - Aggregation: raw_predictions={predictions.tolist()}, "
+                   f"raw_sum={total_prediction:.4f}, scaled={scaled_prediction:.4f}, "
+                   f"final={final_prediction:.4f}, total_employees={total_employees}")
         
         logger.debug(f"Aggregation: raw_sum={total_prediction:.2f}, "
                     f"scaled={scaled_prediction:.2f}, final={final_prediction:.2f}")
