@@ -241,6 +241,26 @@ class ShopFeatureResolver:
             logger.debug("Product relativity lookup is empty.")
             return default_relativity
 
+        # Strategy 0: Handle "NONE" classification failures with random sampling FIRST
+        if present_info.get('item_main_category', 'NONE') == 'NONE' and present_info.get('brand', 'NONE') == 'NONE':
+            logger.debug(f"Product has NONE category and brand - using random sampling from popular products")
+            
+            # Sample from products with decent performance (not bottom quartile)
+            popular_products = self.product_relativity_lookup[
+                self.product_relativity_lookup['product_share_in_shop'] >
+                self.product_relativity_lookup['product_share_in_shop'].quantile(0.25)
+            ]
+            
+            if not popular_products.empty:
+                # Take a random sample to add variation
+                import random
+                sample_size = min(100, len(popular_products))
+                sampled_products = popular_products.sample(n=sample_size, random_state=hash(str(present_info.get('id', 'default'))) % 2**31)
+                
+                sampled_features = sampled_products[['product_share_in_shop', 'brand_share_in_shop', 'product_rank_in_shop', 'brand_rank_in_shop']].mean().to_dict()
+                logger.debug(f"Used random sampling from {sample_size} popular products for NONE classification")
+                return sampled_features
+
         # Strategy 1: Try exact shop + product match
         exact_shop_conditions = (
             (self.product_relativity_lookup['employee_shop'] == shop_id) &
