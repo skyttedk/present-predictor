@@ -445,13 +445,13 @@ class GiftDemandPredictor:
         
         return min(0.95, confidence)
 
-# Singleton instance for API use
+# Force fresh instances to avoid caching issues during development
 _predictor_instance = None
 
-def get_predictor(model_path: str = "models/catboost_poisson_model/catboost_poisson_model.cbm", 
+def get_predictor(model_path: str = "models/catboost_poisson_model/catboost_poisson_model.cbm",
                  historical_data_path: Optional[str] = "src/data/historical/present.selection.historic.csv") -> GiftDemandPredictor:
     """
-    Get singleton predictor instance for efficient model reuse.
+    Get predictor instance. Creates fresh instance to ensure latest code changes are applied.
     
     Args:
         model_path: Path to trained CatBoost model
@@ -462,8 +462,8 @@ def get_predictor(model_path: str = "models/catboost_poisson_model/catboost_pois
     """
     global _predictor_instance
     
-    if _predictor_instance is None:
-        logger.info("Initializing predictor singleton")
-        _predictor_instance = GiftDemandPredictor(model_path, historical_data_path)
+    # Always create fresh instance to avoid caching issues
+    logger.info("Creating fresh predictor instance to ensure latest code changes")
+    _predictor_instance = GiftDemandPredictor(model_path, historical_data_path)
     
     return _predictor_instance
