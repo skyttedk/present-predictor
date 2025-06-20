@@ -48,7 +48,10 @@ class GiftDemandPredictor:
             'shop_utility_type_diversity_selected', 'shop_sub_category_diversity_selected',
             'shop_most_frequent_main_category_selected', 'shop_most_frequent_brand_selected',
             'unique_product_combinations_in_shop',
-            'is_shop_most_frequent_main_category', 'is_shop_most_frequent_brand'
+            'is_shop_most_frequent_main_category', 'is_shop_most_frequent_brand',
+            # New product relativity features
+            'product_share_in_shop', 'brand_share_in_shop',
+            'product_rank_in_shop', 'brand_rank_in_shop'
         ] + [f'interaction_hash_{i}' for i in range(10)]
         
         # Categorical features (must match training)
@@ -136,16 +139,20 @@ class GiftDemandPredictor:
             employee_stats = self._calculate_employee_stats(employees)
             logger.debug(f"Employee demographics: {employee_stats}")
             
-            # Get shop features
-            shop_features = self.shop_resolver.get_shop_features(shop_id, branch)
-            logger.debug(f"Shop features resolved for shop {shop_id}")
+            # Get shop features - This will now be done inside the loop for each present
+            # shop_features = self.shop_resolver.get_shop_features(shop_id, branch)
+            # logger.debug(f"Shop features resolved for shop {shop_id}")
             
             predictions = []
             
             for present in presents:
                 try:
+                    # Resolve features for each present individually now
+                    shop_and_product_features = self.shop_resolver.get_shop_features(shop_id, branch, present)
+                    logger.debug(f"Features resolved for shop {shop_id} and present {present.get('id', 'unknown')}")
+
                     prediction = self._predict_for_present(
-                        present, employee_stats, shop_id, branch, shop_features, len(employees)
+                        present, employee_stats, shop_id, branch, shop_and_product_features, len(employees)
                     )
                     predictions.append(prediction)
                     
@@ -322,7 +329,10 @@ class GiftDemandPredictor:
             'shop_main_category_diversity_selected', 'shop_brand_diversity_selected',
             'shop_utility_type_diversity_selected', 'shop_sub_category_diversity_selected',
             'unique_product_combinations_in_shop',
-            'is_shop_most_frequent_main_category', 'is_shop_most_frequent_brand'
+            'is_shop_most_frequent_main_category', 'is_shop_most_frequent_brand',
+            # Add new relativity features to numeric handling
+            'product_share_in_shop', 'brand_share_in_shop',
+            'product_rank_in_shop', 'brand_rank_in_shop'
         ] + [f'interaction_hash_{i}' for i in range(10)]
         
         for col in numeric_cols:

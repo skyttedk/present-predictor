@@ -212,6 +212,45 @@ def engineer_new_interaction_features(df: pd.DataFrame, n_interaction_features: 
     logging.info(f"Shape after new interaction features: {df.shape}")
     return df
 
+
+def engineer_product_relativity_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Engineers features describing a product's historical performance relative to its shop."""
+    logging.info("[FEATURE ENG] Engineering product relativity features...")
+    if df.empty:
+        logging.warning("Skipping product relativity features as df is empty.")
+        return df.copy()
+
+    # Ensure selection_count is numeric
+    df['selection_count'] = pd.to_numeric(df['selection_count'], errors='coerce').fillna(0)
+
+    # --- Calculate total selections for normalization ---
+    # Total selections per shop
+    shop_total_selections = df.groupby('employee_shop')['selection_count'].transform('sum')
+    
+    # Total selections per brand within each shop
+    brand_total_selections_in_shop = df.groupby(['employee_shop', 'product_brand'])['selection_count'].transform('sum')
+
+    # --- Engineer Share Features ---
+    # Use a small epsilon to avoid division by zero
+    epsilon = 1e-9
+    df['product_share_in_shop'] = df['selection_count'] / (shop_total_selections + epsilon)
+    df['brand_share_in_shop'] = brand_total_selections_in_shop / (shop_total_selections + epsilon)
+
+    # --- Engineer Rank Features ---
+    df['product_rank_in_shop'] = df.groupby('employee_shop')['selection_count'].rank(method='dense', ascending=False)
+    
+    # For brand rank, we need to rank the total selections for the brand, not the row-level count
+    # First, let's add the brand total selections as a temporary column
+    df['temp_brand_total_selections'] = brand_total_selections_in_shop
+    df['brand_rank_in_shop'] = df.groupby('employee_shop')['temp_brand_total_selections'].rank(method='dense', ascending=False)
+    df = df.drop(columns=['temp_brand_total_selections'])
+
+    logging.info(f"Shape after product relativity features: {df.shape}")
+    logging.info(f"New features created: product_share_in_shop, brand_share_in_shop, product_rank_in_shop, brand_rank_in_shop")
+    
+    return df
+
+
 def prepare_features_for_catboost(final_features_df: pd.DataFrame, grouping_cols: list) -> tuple[pd.DataFrame, pd.Series, pd.Series, list, dict]:
     """Prepares X, y, y_strata, identifies categorical features, and calculates numeric medians for CatBoost."""
     logging.info("[FEATURES PREP] Preparing final X, y for CatBoost and calculating medians...")
@@ -301,9 +340,24 @@ def main():
     features_with_shop = engineer_shop_assortment_features(agg_df)
 
     # 4. Engineer New Interaction Features
-    final_features_df = engineer_new_interaction_features(features_with_shop)
+    features_with_interactions = engineer_new_interaction_features(features_with_shop)
 
-    # 5. Prepare Features for CatBoost
+    # 5. Engineer Product Relativity Features
+    final_features_df = engineer_product_relativity_features(features_with_interactions)
+
+    # Save the lookup table for the predictor
+    product_relativity_features_path = os.path.join(MODELS_DIR, 'product_relativity_features.csv')
+    lookup_cols = base_grouping_cols + ['product_share_in_shop', 'brand_share_in_shop', 'product_rank_in_shop', 'brand_rank_in_shop']
+    # Ensure columns exist before trying to save them
+    lookup_cols_exist = [col for col in lookup_cols if col in final_features_df.columns]
+    if lookup_cols_exist:
+        final_features_df[lookup_cols_exist].to_csv(product_relativity_features_path, index=False)
+        logging.info(f"Product relativity feature lookup table saved to {product_relativity_features_path}")
+    else:
+        logging.warning("Could not save product relativity lookup table as no lookup columns were found.")
+
+
+    # 6. Prepare Features for CatBoost
     X, y, y_strata, cat_features_for_model, numeric_medians = prepare_features_for_catboost(final_features_df, base_grouping_cols)
     
     if X.empty or y.empty:
