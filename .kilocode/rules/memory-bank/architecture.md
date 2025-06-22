@@ -1,9 +1,9 @@
 # System Architecture
 
 ## Overview
-The Predictive Gift Selection System follows a modular architecture with clear separation of concerns between data processing, machine learning, and API layers. The current primary focus is on resolving a mismatch between the ML model's training target and its interpretation during prediction.
+The Predictive Gift Selection System follows a modular architecture. **Following expert review, the system is undergoing a critical re-architecture to address a fundamental mismatch between the ML model's training target and its prediction application.**
 
-## High-Level Architecture
+## High-Level Architecture (Revised)
 
 ```mermaid
 graph TD
@@ -11,17 +11,17 @@ graph TD
     B --> C{Feature Engineering & Context Resolution};
     C --> D[Data Storage / Cache (Present Attributes)];
     C --> E{ML Prediction (CatBoost Regressor)};
-    E --> F{Prediction Aggregation & Formatting};
+    E --> F{Prediction Aggregation & Scaling};
     F --> A;
     subgraph DataSources
-        G[Historical Data (CSV)]
+        G[Historical Data (CSV) + Employee Counts]
         H[Present Attributes Schema (JSON)]
         I[Real-time Request Data]
     end
     G --> J[Model Training Pipeline (catboost_trainer.py)];
     H --> C;
     I --> B;
-    J --> K[Trained CatBoost Model];
+    J --> K[Trained CatBoost Model (Predicts Selection Rate)];
     K --> E;
     D --> C;
 ```
@@ -30,103 +30,73 @@ graph TD
 
 ### 1. API Layer
 **Location**: [`src/api/`](src/api/:1)
-- **Framework**: FastAPI
-- **Responsibilities**:
-  - Request validation and parsing (using Pydantic schemas).
-  - API endpoint management (e.g., `/predict`).
-  - Response formatting.
-  - Orchestration of feature processing and prediction.
-- **Key Files**:
-  - [`src/api/main.py`](src/api/main.py:1): FastAPI application entry point, `/predict` endpoint.
-  - [`src/api/schemas/requests.py`](src/api/schemas/requests.py:1): API request models.
-  - [`src/api/schemas/responses.py`](src/api/schemas/responses.py:1): API response models.
+- **Responsibilities**: Request validation, API endpoint management, orchestration of feature processing and prediction.
+- **Key Files**: [`src/api/main.py`](src/api/main.py:1), [`src/api/schemas/requests.py`](src/api/schemas/requests.py:1), [`src/api/schemas/responses.py`](src/api/schemas/responses.py:1).
 
 ### 2. Data Processing & Feature Engineering Layer
 **Location**: [`src/data/`](src/data/:1), [`src/ml/shop_features.py`](src/ml/shop_features.py:1)
-- **Frameworks**: Pandas
 - **Responsibilities**:
-  - **Historical Data Preprocessing** (in [`src/ml/catboost_trainer.py`](src/ml/catboost_trainer.py:1)): Cleaning, aggregation to create `selection_count`.
-  - **Real-time Feature Engineering** (in [`src/ml/predictor.py`](src/ml/predictor.py:1), [`src/ml/shop_features.py`](src/ml/shop_features.py:1)):
-    - Classification of gift attributes (potentially using OpenAI, as per `OpenAISettings` in [`src/config/settings.py`](src/config/settings.py:94)).
-    - Employee gender classification (e.g., `gender_guesser`).
-    - Resolution of shop-specific features.
-    - Creation of feature vectors for the ML model.
-- **Key Files**:
-  - [`src/data/classifier.py`](src/data/classifier.py:1): Gift categorization logic (if used).
-  - [`src/data/gender_classifier.py`](src/data/gender_classifier.py:1): Gender classification.
-  - [`src/ml/shop_features.py`](src/ml/shop_features.py:1): `ShopFeatureResolver` for shop-specific context.
-  - [`src/ml/predictor.py`](src/ml/predictor.py:1): Orchestrates feature creation for prediction.
+  - **Historical Data Preprocessing** (in [`src/ml/catboost_trainer.py`](src/ml/catboost_trainer.py:1)): **Crucially, this now involves calculating `selection_rate` by dividing `selection_count` by the total number of employees in that historical group.**
+  - **Real-time Feature Engineering** (in [`src/ml/predictor.py`](src/ml/predictor.py:1)): Classification of gift attributes, gender classification, and resolution of shop-specific features.
+- **Key Files**: [`src/data/classifier.py`](src/data/classifier.py:1), [`src/data/gender_classifier.py`](src/data/gender_classifier.py:1), [`src/ml/shop_features.py`](src/ml/shop_features.py:1).
 
-### 3. Machine Learning Layer
+### 3. Machine Learning Layer (Revised)
 **Location**: [`src/ml/`](src/ml/:1)
 - **Framework**: CatBoost
 - **Responsibilities**:
   - **Model Training** ([`src/ml/catboost_trainer.py`](src/ml/catboost_trainer.py:1)):
-    - Trains a `CatBoostRegressor` model with a `Poisson` loss function.
-    - Target variable: `selection_count` (total occurrences of a feature combination).
-    - Includes feature engineering (shop assortment, interaction features).
-    - Hyperparameter tuning with Optuna.
+    - Trains a `CatBoostRegressor` model.
+    - **New Target Variable**: `selection_rate` (a float, not a count).
+    - **New Loss Function**: A standard regression loss (e.g., RMSE), **not** Poisson.
   - **Prediction** ([`src/ml/predictor.py`](src/ml/predictor.py:1)):
-    - Loads the trained CatBoost model.
-    - Makes predictions based on engineered features.
-    - **Prediction Aggregation**: The `_aggregate_predictions()` method now correctly weights predictions by gender ratios and normalizes the final output to ensure the total quantity matches the number of employees.
-- **Key Files**:
-  - [`src/ml/catboost_trainer.py`](src/ml/catboost_trainer.py:1): Training pipeline.
-  - [`src/ml/predictor.py`](src/ml/predictor.py:1): Prediction service.
-  - Model artifacts stored in `models/catboost_poisson_model/`.
+    - Loads the retrained CatBoost model.
+    - Predicts the `selection_rate` for each gift and gender combination.
+    - **Prediction Aggregation**: The `_aggregate_predictions()` method will now correctly scale the predicted rate to an expected quantity.
+- **Key Files**: [`src/ml/catboost_trainer.py`](src/ml/catboost_trainer.py:1), [`src/ml/predictor.py`](src/ml/predictor.py:1).
 
 ### 4. Configuration Layer
 **Location**: [`src/config/`](src/config/:1)
-- **Responsibilities**: Manages application, API, data, model, and external service (e.g., OpenAI) configurations using Pydantic.
-- **Key Files**:
-  - [`src/config/settings.py`](src/config/settings.py:1): Main application settings.
-  - [`src/config/model_config.py`](src/config/model_config.py:1): (Potentially outdated) XGBoost-focused model configurations. The CatBoost settings are primarily in `settings.py`.
+- **Responsibilities**: Manages application, API, data, and model configurations.
+- **Key Files**: [`src/config/settings.py`](src/config/settings.py:1).
 
-## Data Flow Architecture (Focus on Prediction)
+## Data Flow Architecture (Revised Prediction Pipeline)
 
 **Input Data for Prediction:**
-- API Request: Branch code, list of presents (with attributes), list of employees (with gender).
-- Historical Data: Used by `ShopFeatureResolver` and for model training context (medians, etc.).
-- Present Attributes: Cached or classified attributes for gifts.
+- API Request: Branch code, list of presents, list of employees.
+- Historical Data: Used by `ShopFeatureResolver` and for model training context.
 
 **Prediction Pipeline (`predictor.py`):**
 1.  **Request Input**: Branch, presents, employees.
-2.  **Context Resolution**:
-    *   Calculate employee gender statistics (ratios).
-    *   Resolve shop-specific features using `ShopFeatureResolver`.
+2.  **Context Resolution**: Calculate employee gender statistics (ratios and counts).
 3.  **Feature Vector Creation**: For each present, create feature vectors per gender group.
-4.  **Model Prediction (Raw Scores)**: The CatBoost model predicts a "popularity score" for each present. This is calculated by weighting the gender-specific model outputs by the corresponding gender ratio and number of employees.
-    *   `raw_score = sum(model_output_gender * ratio_gender * total_employees)`
-5.  **Prediction Normalization**: The raw scores for all presents are summed up. Each individual score is then normalized against this total to ensure the final sum of `expected_qty` equals `total_employees`.
-    *   `final_qty = (raw_score / total_raw_scores) * total_employees`
-6.  **Response Generation**: Formats the normalized predictions into the final API response.
+4.  **Model Prediction (Selection Rate)**: The CatBoost model predicts the `selection_rate` for each present-gender combination.
+5.  **Prediction Scaling & Aggregation**: The predicted rate is scaled by the number of employees in that gender subgroup to get an expected count. These counts are then summed.
+    *   `expected_count_subgroup = predicted_rate * num_employees_in_subgroup`
+    *   `total_expected_qty = sum(expected_count_subgroup for each subgroup)`
+6.  **Response Generation**: Formats the final expected quantities into the API response. Post-prediction normalization is **not** applied.
 
-## Key Technical Decisions & Design Patterns
+## Key Technical Decisions & Design Patterns (Revised)
 
--   **FastAPI for API**: Leverages Pydantic for data validation and auto-documentation.
+-   **Rate-Based ML Target**: The model now predicts a `selection_rate`, not a raw count. This is the most critical architectural change.
+-   **Standard Regression Loss**: Using RMSE or a similar loss function appropriate for rate prediction.
+-   **Principled Aggregation**: Scaling predictions based on rates and employee counts, which is mathematically sound.
+-   **FastAPI for API**: Leverages Pydantic for data validation.
 -   **Pydantic for Configuration**: Centralized and typed settings management.
--   **CatBoost for ML**: Chosen for its handling of categorical features and performance. Poisson loss for count data.
 -   **Modular Structure**: Separation of API, data processing, and ML concerns.
--   **Singleton Pattern for Predictor**: [`get_predictor()`](src/ml/predictor.py:403) ensures efficient model loading.
--   **Feature Hashing**: Used for interaction features to manage dimensionality.
 
 ## Source Code Structure
-(As outlined in `README.md` and confirmed by file tree)
+(No changes to the file structure itself)
 ```
 src/
-├── api/                 # FastAPI application and endpoints
-├── data/               # Data processing and classification helpers
-├── ml/                 # Machine learning models, training, prediction, features
-├── config/             # Application and model configuration
-└── utils/              # Logging, exceptions (if any)
+├── api/
+├── data/
+├── ml/
+├── config/
+└── utils/
 ```
 
-## Critical Implementation Paths
+## Critical Implementation Paths (New Focus)
 
-1.  **Model Training Target Definition** ([`src/ml/catboost_trainer.py`](src/ml/catboost_trainer.py:108)): `selection_count = cleaned_data.groupby(grouping_cols).size().reset_index(name='selection_count')`. This defines what the model learns.
-2.  **Prediction Aggregation Logic** ([`src/ml/predictor.py`](src/ml/predictor.py:351-372)): `_aggregate_predictions()`. This is where the misinterpretation occurs and needs correction as per Option A.
-3.  **Feature Engineering Consistency**: Ensuring features created at inference time in [`src/ml/predictor.py`](src/ml/predictor.py:1) precisely match those used in training ([`src/ml/catboost_trainer.py`](src/ml/catboost_trainer.py:1)), including handling of missing values, defaults, and data types. The use of `numeric_medians` loaded from training artifacts is a good step here.
-
-## Scalability Considerations (Future)
-- Current focus is on correcting core logic.
-- Future considerations might include more robust data storage than CSVs, caching strategies for features/predictions, and asynchronous processing for heavy tasks.
+1.  **Data Pipeline Modification**: The absolute priority is to modify the training data pipeline to correctly calculate `selection_rate`. This requires access to historical employee counts for each group.
+2.  **Model Retraining**: Retrain the `CatBoostRegressor` on the new `selection_rate` target with an appropriate regression loss function.
+3.  **Prediction Logic Update**: Rewrite the `_aggregate_predictions()` method in [`src/ml/predictor.py`](src/ml/predictor.py:1) to implement the new rate-scaling logic.

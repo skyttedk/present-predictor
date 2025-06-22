@@ -141,7 +141,7 @@ class GiftDemandPredictor:
                     shop_and_product_features = self.shop_resolver.get_shop_features(None, branch, present)
                     
                     prediction = self._predict_for_present(
-                        present, employee_stats, branch, shop_and_product_features, len(employees)
+                        present, employee_stats, branch, shop_and_product_features
                     )
                     raw_predictions.append(prediction)
                     
@@ -170,8 +170,8 @@ class GiftDemandPredictor:
                 for present in presents
             ]
     
-    def _calculate_employee_stats(self, employees: List[Dict]) -> Dict[str, float]:
-        """Calculate employee gender distribution"""
+    def _calculate_employee_stats(self, employees: List[Dict]) -> Dict[str, int]:
+        """Calculate employee gender counts."""
         gender_counts = {'male': 0, 'female': 0, 'unisex': 0}
         
         for emp in employees:
@@ -181,18 +181,10 @@ class GiftDemandPredictor:
             else:
                 gender_counts['unisex'] += 1
         
-        total = len(employees)
-        if total == 0:
-            return {'male': 0.0, 'female': 0.0, 'unisex': 1.0}
-        
-        return {
-            gender: count / total
-            for gender, count in gender_counts.items()
-        }
+        return gender_counts
     
-    def _predict_for_present(self, present: Dict, employee_stats: Dict[str, float],
-                           branch: str, shop_features: Dict,
-                           total_employees: int) -> PredictionResult:
+    def _predict_for_present(self, present: Dict, employee_gender_counts: Dict[str, int],
+                           branch: str, shop_features: Dict) -> PredictionResult:
         """Make prediction for a single present"""
         
         present_id = present.get('id', 'unknown')
@@ -200,14 +192,14 @@ class GiftDemandPredictor:
         
         # Create feature vectors for each gender group with non-zero representation
         rows = []
-        gender_ratios = []
-        for gender, ratio in employee_stats.items():
-            if ratio > 0:
+        gender_counts_list = []
+        for gender, count in employee_gender_counts.items():
+            if count > 0:
                 features = self._create_feature_vector(
                     present, gender, branch, shop_features
                 )
                 rows.append(features)
-                gender_ratios.append(ratio)
+                gender_counts_list.append(count)
         
         if not rows:
             logger.warning(f"No valid employee data for present {present_id}")
@@ -226,19 +218,19 @@ class GiftDemandPredictor:
         
         try:
             # Make predictions using CatBoost Pool
-            predictions = self._make_catboost_prediction(feature_df)
+            predicted_rates = self._make_catboost_prediction(feature_df)
             
             # Aggregate predictions with proper gender ratio weighting
             total_prediction = self._aggregate_predictions(
-                predictions, gender_ratios, total_employees
+                predicted_rates, gender_counts_list
             )
             
             # Calculate confidence
-            confidence = self._calculate_confidence(predictions, len(rows))
+            confidence = self._calculate_confidence(predicted_rates, len(rows))
             
             return PredictionResult(
                 product_id=str(present_id),
-                expected_qty=int(round(max(0, total_prediction))),
+                expected_qty=total_prediction,
                 confidence_score=round(confidence, 2)
             )
             
@@ -368,44 +360,24 @@ class GiftDemandPredictor:
         
         return predictions
     
-    def _aggregate_predictions(self, predictions: np.ndarray, gender_ratios: List[float],
-                             total_employees: int) -> float:
+    def _aggregate_predictions(self, predicted_rates: np.ndarray, gender_counts: List[int]) -> float:
         """
-        Aggregate model predictions to total quantity using proper gender weighting.
-        
-        IMPORTANT: The model was trained on historical selection_count which represents
-        cumulative counts across all historical data for a shop/product/gender combination.
-        
-        For each gender group, we weight the prediction by the gender ratio,
-        which gives us the expected value for each gender subgroup.
+        Aggregate model predictions (selection rates) to total quantity.
         """
         
-        if len(predictions) != len(gender_ratios):
-            logger.error(f"Mismatch: {len(predictions)} predictions vs {len(gender_ratios)} ratios")
+        if len(predicted_rates) != len(gender_counts):
+            logger.error(f"Mismatch: {len(predicted_rates)} predictions vs {len(gender_counts)} counts")
             return 0.0
         
-        # Calculate weighted predictions for each gender group
-        weighted_predictions = []
-        for pred, ratio in zip(predictions, gender_ratios):
-            # Weight each prediction by its gender ratio
-            weighted_pred = pred * ratio
-            weighted_predictions.append(weighted_pred)
+        # Calculate expected quantity for each gender group
+        expected_quantities = []
+        for rate, count in zip(predicted_rates, gender_counts):
+            expected_quantities.append(rate * count)
+            
+        # Sum all gender-specific expected quantities
+        total_expected_qty = np.sum(expected_quantities)
         
-        # Sum all gender-specific predictions
-        total_prediction = np.sum(weighted_predictions)
-        
-        # Return raw prediction without any artificial scaling
-        final_prediction = max(0, total_prediction)
-        
-        # HEROKU DEBUG: Enhanced logging to see exact calculation values
-        logger.info(f"HEROKU DEBUG - Aggregation: raw_predictions={predictions.tolist()}, "
-                   f"gender_ratios={gender_ratios}, weighted_predictions={weighted_predictions}, "
-                   f"total_sum={total_prediction:.4f}, final={final_prediction:.4f}, "
-                   f"total_employees={total_employees}")
-        
-        logger.debug(f"Aggregation: weighted_sum={total_prediction:.2f}, final={final_prediction:.2f}")
-        
-        return final_prediction
+        return max(0, total_expected_qty)
     
     def _calculate_confidence(self, predictions: np.ndarray, num_groups: int) -> float:
         """Calculate prediction confidence score"""

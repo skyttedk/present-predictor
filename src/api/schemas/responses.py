@@ -16,15 +16,8 @@ class PredictionResult(BaseModel):
     """
     
     product_id: str = Field(..., description="Product identifier from the request")
-    expected_qty: int = Field(..., description="Predicted demand quantity", ge=0)
+    expected_qty: float = Field(..., description="Predicted demand quantity", ge=0)
     confidence_score: Optional[float] = Field(None, description="Prediction confidence (0-1)", ge=0.0, le=1.0)
-    
-    @validator('expected_qty')
-    def validate_quantity(cls, v):
-        """Ensure quantity is non-negative."""
-        if v < 0:
-            raise ValueError("Expected quantity cannot be negative")
-        return v
     
     class Config:
         json_schema_extra = {

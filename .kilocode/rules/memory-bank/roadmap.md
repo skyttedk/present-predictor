@@ -312,117 +312,39 @@ class DemandPredictor:
 - Provides further improvement over the baseline model and manual estimation.
 - Increases confidence in using the model for operational inventory planning.
 
-## Phase 3.5: CatBoost & Two-Stage Model Implementation (Week 7-8) - EXPERT RECOMMENDED
+## Phase 4: Re-architecture (Expert-Guided)
 
-### 3.5.1 CatBoost Model Implementation
-**Timeline**: 1 week
-**Priority**: HIGH - Quick win for 2-4 p.p. R² improvement
+### 4.1 Training Pipeline Re-engineering
+**Timeline**: 3-4 days
+**Priority**: CRITICAL
 **Deliverables**:
-- [ ] Create new CatBoost training notebook
-- [ ] Implement Poisson loss function (no log transform)
-- [ ] Configure native categorical handling
-- [ ] Compare performance with XGBoost baseline
-- [ ] Feature importance analysis with CatBoost
+- [ ] **Modify Data Source**: Update data loading to include `total_employees_in_group` for each historical record.
+- [ ] **New Target Variable**: Create `selection_rate` = `selection_count` / `total_employees_in_group`.
+- [ ] **Update `catboost_trainer.py`**:
+    - Change target to `selection_rate`.
+    - Change loss function from `Poisson` to `RMSE` or another standard regression loss.
+    - Remove `log1p` transformation.
+- [ ] **Retrain Model**: Train the CatBoost model on the new rate-based target.
+- [ ] **Validate Performance**: Evaluate the new model's performance on predicting rates.
 
-**Implementation Details**:
-```python
-from catboost import CatBoostRegressor
-
-model = CatBoostRegressor(
-    iterations=1000,
-    loss_function='Poisson',  # Count-aware objective
-    cat_features=categorical_cols,  # Native handling
-    random_state=42
-)
-```
-
-**Expected Outcomes**:
-- Baseline CatBoost R² ≈ 0.33-0.35 (2-4 p.p. gain from Poisson loss)
-- Better handling of high-cardinality features (shop, branch, brand)
-- No need for log transformation
-
-### 3.5.2 Two-Stage Model Architecture
-**Timeline**: 1 week
-**Priority**: HIGH - Expected 8-25% RMSE reduction
-**Deliverables**:
-- [ ] Stage 1: Binary classifier (will select gift?)
-- [ ] Stage 2: Count regressor (how many? - positives only)
-- [ ] Combined prediction pipeline
-- [ ] Performance comparison with single model
-- [ ] API integration design for two-stage predictions
-
-**Two-Stage Design**:
-```python
-# Stage 1: Binary Classification
-from catboost import CatBoostClassifier
-classifier = CatBoostClassifier(
-    iterations=500,
-    cat_features=categorical_cols
-)
-
-# Stage 2: Count Regression (positives only)
-regressor = CatBoostRegressor(
-    loss_function='Poisson',
-    cat_features=categorical_cols
-)
-
-# Final prediction = p_select * expected_count
-```
-
-### 3.5.3 New Feature Engineering
-**Timeline**: 3 days
-**Priority**: MEDIUM - Additional 1-2 p.p. R² gain
-**Deliverables**:
-- [ ] Shop-level share features:
-  - `product_share_in_shop`
-  - `brand_share_in_shop`
-  - `category_share_in_shop`
-- [ ] Rank features:
-  - `product_rank_in_shop`
-  - `brand_rank_in_shop`
-- [ ] Interaction features via hashing trick
-- [ ] Integration with existing feature pipeline
-
-**Status**: 🚀 **READY TO START** - Expert guidance received
-
-## Phase 3.6: Model Evaluation & Optimization (Week 9)
-
-### 3.6.1 Advanced Cross-Validation
-**Timeline**: 3 days
-**Deliverables**:
-- [ ] Leave-One-Shop-Out CV implementation
-- [ ] Cold-start performance assessment
-- [ ] Business metric evaluation (aggregated MAPE)
-- [ ] Confidence interval generation
-
-### 3.6.2 Performance Benchmarking
+### 4.2 Prediction Pipeline Correction
 **Timeline**: 2 days
+**Priority**: CRITICAL
 **Deliverables**:
-- [ ] Compare XGBoost vs CatBoost vs Two-Stage
-- [ ] Document performance gains from each improvement
-- [ ] Create performance visualization dashboard
-- [ ] Finalize model selection for production
+- [ ] **Update `predictor.py`**:
+    - Modify `_aggregate_predictions` to correctly scale the predicted rate.
+    - New logic: `expected_qty = predicted_rate * num_employees_in_subgroup`.
+- [ ] **Update `predict` method**: Ensure the overall logic sums the scaled predictions from subgroups.
+- [ ] **Unit & Integration Tests**: Create new tests to validate the rate-based prediction logic.
 
-**Expected Final Performance**:
-- Target CV R² ≈ 0.36-0.41 (from current 0.3112)
-- Realistic ceiling with current features: R² ≈ 0.45
-- Business-ready performance for inventory planning
+### 4.3 API and Schema Updates
+**Timeline**: 1 day
+**Priority**: MEDIUM
+**Deliverables**:
+- [ ] Review API schemas in `src/api/schemas/` to ensure they align with any changes.
+- [ ] Update API documentation if necessary.
 
-## Phase 4: Data Collection for Future Enhancement (Ongoing)
-
-### 4.1 Historical Data Expansion
-**Timeline**: Ongoing (as data becomes available)
-**Priority**: LOW - Current data sufficient for R² ≈ 0.40
-**Note**: Price data won't help (all gifts in shop are same price range)
-**Focus Areas**:
-- [ ] Merchandising data (position on page, promotions)
-- [ ] Temporal patterns (day-of-season, urgency indicators)
-- [ ] Product descriptions for text embeddings
-- [ ] Product images for visual embeddings
-
-**Status**: ✅ **NOT BLOCKING** - Current data sufficient for optimization
-
-## Phase 5: API Development (Week 10-11)
+## Phase 5: API Development & Integration (Post-Re-architecture)
 
 ### 5.1 FastAPI Application Setup
 **Timeline**: 2 days
@@ -435,221 +357,32 @@ regressor = CatBoostRegressor(
 
 **Status**: ⏳ **IN PROGRESS / NEXT UP**
 
-### 5.2 Prediction Endpoints with Two-Stage Support
+### 5.2 Prediction Endpoints
 **Timeline**: 3 days (after 5.1)
 **Deliverables**:
 - [ ] `src/api/endpoints/predictions.py` - Prediction endpoints
-- [ ] Three-step processing pipeline implementation
-- [ ] Two-stage model integration
+- [ ] Integration of the re-architected prediction pipeline.
 - [ ] Request validation and sanitization
-- [ ] Response formatting with confidence intervals
 - [ ] API documentation (OpenAPI/Swagger)
-
-**Updated API Endpoint Structure**:
-```python
-@app.post("/predict", response_model=List[PredictionResponse])
-async def predict_demand(request: PredictionRequest):
-    # Step 1: Validate request
-    validated_data = validate_request(request)
-    
-    # Step 2: Classify and transform data
-    classified_data = classify_and_transform(validated_data)
-    
-    # Step 3: Two-stage prediction
-    selection_probs = predict_selection_probability(classified_data)
-    expected_counts = predict_counts_if_selected(classified_data)
-    
-    # Step 4: Combined predictions
-    predictions = combine_predictions(selection_probs, expected_counts)
-    
-    return predictions
-```
 
 ### 5.3 API Testing and Documentation
 **Timeline**: 2 days
 **Deliverables**:
-- [ ] Comprehensive API tests
-- [ ] Integration tests for full pipeline
-- [ ] API documentation improvements
-- [ ] Example requests and responses
-- [ ] Performance testing
-
-## Phase 6: Integration and Testing (Week 12)
-
-### 6.1 End-to-End Integration
-**Timeline**: 3 days
-**Deliverables**:
-- [ ] Complete pipeline integration
-- [ ] Data flow validation
-- [ ] Error handling verification
-- [ ] Performance optimization
-- [ ] Memory usage optimization
-
-### 6.2 Comprehensive Testing
-**Timeline**: 3 days
-**Deliverables**:
-- [ ] Unit tests for all components (target: >90% coverage)
-- [ ] Integration tests for API endpoints
-- [ ] Model performance validation tests
-- [ ] Load testing for API endpoints
-- [ ] Edge case testing
-
-### 6.3 Documentation and Examples
-**Timeline**: 1 day
-**Deliverables**:
-- [ ] Complete API documentation
-- [ ] Usage examples and tutorials
-- [ ] Model training documentation
-- [ ] Deployment guide
-- [ ] Troubleshooting guide
-
-## Phase 7: Production Model Training (Week 13)
-
-### 7.1 Historical Data Processing
-**Timeline**: 2 days
-**Prerequisites**: Historical gift selection data access
-**Deliverables**:
-- [ ] Historical data preprocessing
-- [ ] Feature engineering on real data
-- [ ] Data quality validation
-- [ ] Training dataset preparation
-
-### 7.2 Final Model Training
-**Timeline**: 3 days
-**Deliverables**:
-- [ ] Train final CatBoost + Two-Stage models on full data
-- [ ] Model performance evaluation against all baselines
-- [ ] Feature importance analysis
-- [ ] Model validation and testing
-- [ ] Production performance metrics
-
-### 7.3 Model Finalization
-**Timeline**: 2 days
-**Deliverables**:
-- [ ] Hyperparameter tuning
-- [ ] Cross-validation optimization
-- [ ] Performance benchmarking
-- [ ] Model selection and finalization
-
-## Phase 8: Deployment Preparation (Week 14)
-
-### 8.1 Production Readiness
-**Timeline**: 3 days
-**Deliverables**:
-- [ ] Environment configuration for production
-- [ ] Logging and monitoring setup
-- [ ] Security hardening
-- [ ] Performance optimization
-- [ ] Docker containerization (optional)
-
-### 8.2 Deployment Testing
-**Timeline**: 2 days
-**Deliverables**:
-- [ ] Production environment testing
-- [ ] Load testing validation
-- [ ] Security testing
-- [ ] Backup and recovery procedures
-
-### 8.3 Documentation and Handover
-**Timeline**: 2 days
-**Deliverables**:
-- [ ] Operations manual
-- [ ] Monitoring and alerting setup
-- [ ] Maintenance procedures
-- [ ] User training materials
+- [ ] Comprehensive API tests for the new logic.
+- [ ] Integration tests for the full, corrected pipeline.
+- [ ] API documentation improvements.
 
 ## Success Criteria and Milestones
 
 ### Technical Milestones
 - [x] **Week 1**: Project foundation complete ✅
 - [x] **Week 3**: Data pipeline functional ✅
-- [x] **Week 5**: ML pipeline operational (baseline model R² ≈ 0.2947) ✅
-- [x] **Week 6**: Model enhanced with shop features (CV R² ≈ 0.3112) ✅
-- [ ] **Week 7-8**: CatBoost + Two-Stage implementation (Expected R² ≈ 0.36-0.41) 🚀 **NEXT**
-- [ ] **Week 10-11**: API Development with two-stage support
-- [ ] **Week 12**: Full Integration and Testing
-- [ ] **Week 14**: Production Deployment
+- [x] **Week 6**: Initial model with shop features (CV R² ≈ 0.3112) ✅
+- [ ] **Week 7-8**: Re-architecture complete (rate-based model) 🚀 **NEXT**
+- [ ] **Week 9-10**: API integration and testing of new model.
 
 ### Performance Targets
-- [ ] **API Response Time**: < 2 seconds for prediction requests
-- ✅ **Prediction Accuracy**: Current R² ≈ 0.31 is respectable (69% of realistic ceiling)
-- 🎯 **Target Performance**: R² ≈ 0.36-0.41 with CatBoost + Two-Stage
-- [x] **Test Coverage**: >90% for all completed components ✅
-- [ ] **API Throughput**: Support 100+ concurrent requests
-- ✅ **Model Performance**: Current sufficient, clear path to improvement
-- ✅ **Data Sufficiency**: Sufficient for R² ≈ 0.40-0.45 target
+- [ ] **Prediction Accuracy**: Achieve a stable, calibrated model that provides meaningful discrimination between gifts.
+- [ ] **Business Logic**: `sum(expected_qty)` should be a reasonable reflection of `total_employees`, without artificial normalization.
 
-### Business Objectives
-- [ ] **Inventory Optimization**: 40% improvement in inventory balance
-- [ ] **Operational Efficiency**: Reduced post-season complexity
-- [ ] **Customer Satisfaction**: Improved gift availability
-- [ ] **ROI**: Positive return from reduced surplus and back-orders
-
-## Risk Mitigation
-
-### Technical Risks
-- **Data Quality Issues**: Implement robust validation and cleaning
-- **Model Performance**: Use cross-validation and multiple metrics
-- **API Performance**: Implement caching and optimization
-- **Integration Complexity**: Incremental testing and validation
-
-### Dependencies
-- **Historical Data Access**: Critical for model training
-- **Data Format Specification**: Required for preprocessing design
-- **Infrastructure Requirements**: Needed for deployment planning
-- **User Acceptance**: Important for final validation
-
-## Resource Requirements
-
-### Development Team
-- **Data Scientist**: ML pipeline development
-- **Backend Developer**: API development
-- **DevOps Engineer**: Deployment and infrastructure
-- **QA Engineer**: Testing and validation
-
-### Infrastructure
-- **Development Environment**: Local development setup
-- **Testing Environment**: Isolated testing infrastructure
-- **Production Environment**: Scalable production deployment
-- **Data Storage**: Historical data and model storage
-
-### Tools and Services
-- **Version Control**: Git repository
-- **CI/CD Pipeline**: Automated testing and deployment
-- **Monitoring**: Application and model performance monitoring
-- **Documentation**: API and technical documentation
-
-## Next Actions (Expert-Guided Priorities)
-
-### Immediate Priority (Week 1-2) - Quick Wins
-1. **CatBoost Implementation** 🚀:
-   - Create new notebook for CatBoost with Poisson loss
-   - No log transformation needed
-   - Expected gain: 2-4 p.p. R²
-   
-2. **Two-Stage Model** 🚀:
-   - Implement binary classification + count regression
-   - Expected gain: 8-25% RMSE reduction
-   
-3. **New Features**:
-   - Add shop-level share and rank features
-   - Expected gain: 1-2 p.p. R²
-
-### Short Term (Week 3-4)
-1. **Complete CatBoost Notebook**: Full implementation and validation
-2. **Two-Stage Pipeline**: Build production-ready pipeline
-3. **Leave-One-Shop-Out CV**: Assess cold-start performance
-4. **Update Memory Bank**: Document new model architecture
-
-### Medium Term (Month 1-2)
-1. **API Integration**: Deploy two-stage predictions
-2. **Hierarchical Models**: If cold-start gap appears
-3. **Business Metrics**: Optimize for aggregated MAPE
-4. **Production Deployment**: Launch optimized system
-
-### Big Bets (Quarter 1-2)
-1. **Recommender Formulation**: Two-tower model approach
-2. **Embeddings**: Text/image features (if data available)
-3. **Monte-Carlo Simulation**: Inventory confidence intervals
-
-This roadmap now reflects expert guidance with realistic expectations and clear path to R² ≈ 0.40+ through technical improvements alone.
+This roadmap now reflects the critical re-architecture plan based on expert feedback.

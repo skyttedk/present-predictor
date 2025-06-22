@@ -1,43 +1,40 @@
 # Current Context
 
 ## Project Status
-**Phase**: Production Ready
-**Last Updated**: June 20, 2025
+**Phase**: Re-architecting (Implementing Expert Recommendations)
+**Last Updated**: June 22, 2025
 
 ## Current Work Focus
-**CORE LOGIC FIXED**: The prediction pipeline now correctly handles gender-based weighting and normalizes the final output to ensure the total predicted quantity matches the number of employees.
+**CRITICAL RE-ARCHITECTURE REQUIRED**: We have received feedback from an ML expert that our current approach is fundamentally flawed. The model's predictions are unreliable (collapsing to zero or uniform values) due to a structural mismatch between the training target and the business prediction need.
 
-**Successfully Implemented**:
-1.  **Gender-Weighted Predictions (June 20, 2025)**:
-    -   The `_aggregate_predictions` method in [`src/ml/predictor.py`](src/ml/predictor.py:1) now correctly calculates the expected quantity for each gender subgroup.
-    -   Formula: `expected_qty_gender = model_output * gender_ratio * total_employees`
-
-2.  **Prediction Normalization (June 20, 2025)**:
-    -   The main `predict` method in [`src/ml/predictor.py`](src/ml/predictor.py:1) now treats the initial predictions as "popularity scores."
-    -   These scores are summed, and each individual score is normalized against the total to ensure the final sum of `expected_qty` equals `total_employees`.
-    -   Formula: `final_qty = (raw_score / total_raw_scores) * total_employees`
-
-3.  **Validation Results**:
-    -   **Before**: Total predicted quantity (`~843`) far exceeded the number of employees (`57`).
-    -   **After**: Total predicted quantity (`57`) now correctly matches the number of employees. Predictions are distributed proportionally based on the model's assessment of popularity.
+**Expert Diagnosis Summary**:
+1.  **Target Mismatch**: The model is trained on `selection_count` (a cumulative historical count), but we need to predict a per-session quantity. This is the root cause of the scale mismatch and unreliable predictions.
+2.  **Aggregation Flaw**: The current aggregation logic (`sum(prediction * gender_ratio)`) is incorrect because the model's output is not a probability or rate.
+3.  **Zero/Uniform Predictions**: This is a symptom of the model being "confused" by the target mismatch, especially for cold-start (unseen) gift combinations.
 
 ## Recent Changes
--   **June 20, 2025**:
-    -   ✅ Fixed gender-based prediction weighting in `_aggregate_predictions`.
-    -   ✅ Implemented normalization logic in the main `predict` method.
-    -   ✅ Tested and verified that the total predicted quantity now matches the number of employees.
-    -   ✅ Updated `architecture.md` to reflect the new, correct data flow.
+-   **June 22, 2025**:
+    -   ✅ Received detailed feedback from ML expert.
+    -   ✅ Confirmed that post-prediction normalization is not the correct solution.
+    -   ✅ Identified that the core issue is the training target (`selection_count`).
+    -   ❌ Previous attempts to fix aggregation logic were incorrect as they didn't address the root cause.
 
-## Next Steps (Future Enhancements)
-1.  **Production Monitoring**:
-    -   Monitor prediction distributions in production.
-    -   Track business validation against actual selections.
-    -   Log feature resolution and normalization statistics.
+## Next Steps (Immediate Priority)
+1.  **Re-engineer the Training Target**:
+    -   The most critical step is to change the target variable from `selection_count` to `selection_rate`.
+    -   Formula: `selection_rate = selection_count / total_employees_in_that_group`.
+    -   **This requires obtaining `total_employees_in_that_group` for each historical data point.** This may be a new data requirement.
 
-2.  **Long-term Enhancement**:
-    -   Obtain historical employee count data per shop/order.
-    -   Retrain the model with a rate-based target (e.g., `selection_rate = selection_count / total_employees_in_shop`) to make the model's output more directly interpretable and potentially remove the need for post-hoc normalization.
+2.  **Retrain the Model**:
+    -   Retrain the CatBoost model to predict the new `selection_rate` target.
+    -   The loss function should be a standard regression loss (like RMSE), not Poisson, as we are now predicting a rate.
 
-3.  **Performance Optimization**:
-    -   Consider caching frequent feature lookups in the `ShopFeatureResolver`.
-    -   Investigate batching predictions for improved performance.
+3.  **Correct the Prediction Pipeline**:
+    -   Update the `predict` and `_aggregate_predictions` methods in [`src/ml/predictor.py`](src/ml/predictor.py:1).
+    -   The new logic will be: `predicted_count = predicted_rate * current_employee_count`.
+    -   This will be done for each gender subgroup and then summed.
+
+4.  **Update Documentation**:
+    -   Update `architecture.md` and `roadmap.md` to reflect the new plan.
+
+This is a significant pivot from the previous approach and is now the highest priority for the project.

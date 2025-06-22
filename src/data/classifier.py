@@ -101,7 +101,7 @@ class DataClassifier:
             for gift in gifts:
                 try:
                     # Classify using OpenAI Assistant
-                    attributes = await client.classify_product(gift.description)
+                    attributes, _, _ = await client.classify_product(gift.description)
                     
                     classified_gift = ClassifiedGift(
                         product_id=gift.product_id,

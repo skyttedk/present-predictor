@@ -93,7 +93,7 @@ def load_and_clean_data(data_path: str) -> pd.DataFrame:
     return cleaned_data
 
 def aggregate_data(cleaned_data: pd.DataFrame) -> tuple[pd.DataFrame, list]:
-    """Aggregates data to unique product-employee combinations."""
+    """Aggregates data and calculates selection_rate."""
     if cleaned_data.empty:
         logging.warning("Cleaned data is empty, skipping aggregation.")
         return pd.DataFrame(), []
@@ -104,9 +104,25 @@ def aggregate_data(cleaned_data: pd.DataFrame) -> tuple[pd.DataFrame, list]:
         'product_color', 'product_durability', 'product_target_gender',
         'product_utility_type', 'product_type'
     ]
-    logging.info(f"[AGGREGATE] Grouping by {len(grouping_cols)} features: {grouping_cols}")
-    agg_data = cleaned_data.groupby(grouping_cols).size().reset_index(name='selection_count')
+    
+    # Ensure total_employees_in_group is numeric
+    if 'total_employees_in_group' not in cleaned_data.columns:
+        logging.error("`total_employees_in_group` column not found. Cannot calculate selection rate.")
+        raise ValueError("`total_employees_in_group` column not found.")
+        
+    cleaned_data['total_employees_in_group'] = pd.to_numeric(cleaned_data['total_employees_in_group'], errors='coerce').fillna(0)
 
+    logging.info(f"[AGGREGATE] Grouping by {len(grouping_cols)} features: {grouping_cols}")
+    
+    agg_data = cleaned_data.groupby(grouping_cols).agg(
+        selection_count=('employee_shop', 'size'),
+        total_employees_in_group=('total_employees_in_group', 'first') # Assuming it's constant per group
+    ).reset_index()
+
+    # Calculate selection_rate
+    agg_data['selection_rate'] = agg_data['selection_count'] / agg_data['total_employees_in_group']
+    agg_data['selection_rate'] = agg_data['selection_rate'].fillna(0) # Handle division by zero
+    
     if not agg_data.empty:
         compression_ratio = len(cleaned_data) / len(agg_data) if len(agg_data) > 0 else 0
         logging.info("Aggregation complete:")
@@ -259,12 +275,12 @@ def engineer_non_leaky_features(df: pd.DataFrame, is_training: bool = True) -> p
 def prepare_features_for_catboost(final_features_df: pd.DataFrame, grouping_cols: list) -> tuple[pd.DataFrame, pd.Series, pd.Series, list, dict]:
     """Prepares X, y, y_strata, identifies categorical features, and calculates numeric medians for CatBoost."""
     logging.info("[FEATURES PREP] Preparing final X, y for CatBoost and calculating medians...")
-    if final_features_df.empty or 'selection_count' not in final_features_df.columns:
-        logging.warning("Skipping final feature preparation as final_features_df is empty or 'selection_count' is missing.")
+    if final_features_df.empty or 'selection_rate' not in final_features_df.columns:
+        logging.warning("Skipping final feature preparation as final_features_df is empty or 'selection_rate' is missing.")
         return pd.DataFrame(), pd.Series(dtype='float64'), pd.Series(dtype='float64'), [], {}
 
-    y = pd.to_numeric(final_features_df['selection_count'], errors='coerce').fillna(0)
-    X = final_features_df.drop(columns=['selection_count']).copy()
+    y = pd.to_numeric(final_features_df['selection_rate'], errors='coerce').fillna(0)
+    X = final_features_df.drop(columns=['selection_count', 'selection_rate', 'total_employees_in_group']).copy()
 
     cat_feature_names = list(grouping_cols)
     cat_feature_names.extend([
@@ -345,8 +361,8 @@ def main():
     logging.info("[SPLIT] Creating train/test split BEFORE feature engineering...")
     
     # Prepare stratification on the aggregated data
-    y_temp = pd.to_numeric(agg_df['selection_count'], errors='coerce').fillna(0)
-    y_strata_temp = pd.cut(y_temp, bins=[-1, 0, 1, 2, 5, 10, np.inf], labels=[0, 1, 2, 3, 4, 5], include_lowest=True)
+    y_temp = pd.to_numeric(agg_df['selection_rate'], errors='coerce').fillna(0)
+    y_strata_temp = pd.cut(y_temp, bins=[-1, 0, 0.1, 0.2, 0.5, 1, np.inf], labels=[0, 1, 2, 3, 4, 5], include_lowest=True)
     
     # Split indices
     train_indices, val_indices = train_test_split(
@@ -399,7 +415,7 @@ def main():
     
     initial_model_params = {
         'iterations': 1000,
-        'loss_function': 'Poisson',
+        'loss_function': 'RMSE',
         'eval_metric': 'R2',
         'random_seed': 42,
         'learning_rate': 0.05,
@@ -426,7 +442,7 @@ def main():
         best_params_final = initial_model_params
     else:
         best_params_final = best_params_optuna
-        best_params_final['loss_function'] = 'Poisson'
+        best_params_final['loss_function'] = 'RMSE'
         best_params_final['eval_metric'] = 'R2'
         best_params_final['random_seed'] = 42
         best_params_final['verbose'] = 100
@@ -507,7 +523,7 @@ def tune_hyperparameters_optuna(X_train, y_train, X_val, y_val, cat_features, n_
             'border_count': trial.suggest_int('border_count', 32, 255),
             'random_strength': trial.suggest_float('random_strength', 1e-8, 10.0, log=True),
             'bagging_temperature': trial.suggest_float('bagging_temperature', 0.0, 1.0),
-            'loss_function': 'Poisson',
+            'loss_function': 'RMSE',
             'eval_metric': 'R2',
             'random_seed': 42,
             'verbose': 0,
@@ -605,7 +621,7 @@ def save_model_artifacts(model, params, metrics, feature_list, cat_feature_list,
     logging.info(f"Model metrics saved to: {metrics_path}")
     
     metadata = {
-        'model_type': 'CatBoost Regressor (Poisson)',
+        'model_type': 'CatBoost Regressor (RMSE)',
         'catboost_version': catboost.__version__,
         'training_timestamp': datetime.now().isoformat(),
         'features_used': feature_list,
