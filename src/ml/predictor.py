@@ -48,10 +48,7 @@ class GiftDemandPredictor:
             'shop_utility_type_diversity_selected', 'shop_sub_category_diversity_selected',
             'shop_most_frequent_main_category_selected', 'shop_most_frequent_brand_selected',
             'unique_product_combinations_in_shop',
-            'is_shop_most_frequent_main_category', 'is_shop_most_frequent_brand',
-            # New product relativity features
-            'product_share_in_shop', 'brand_share_in_shop',
-            'product_rank_in_shop', 'brand_rank_in_shop'
+            'is_shop_most_frequent_main_category', 'is_shop_most_frequent_brand'
         ] + [f'interaction_hash_{i}' for i in range(10)]
         
         # Categorical features (must match training)
@@ -156,38 +153,10 @@ class GiftDemandPredictor:
                         confidence_score=0.0
                     ))
 
-            # Step 2: Normalize predictions so their sum equals total_employees
-            total_raw_demand = sum(p.expected_qty for p in raw_predictions)
+            # Return raw predictions without normalization
+            logger.info(f"Prediction complete. Total raw demand: {sum(p.expected_qty for p in raw_predictions)} units")
             
-            final_predictions = []
-            if total_raw_demand > 0:
-                for pred in raw_predictions:
-                    normalized_qty = (pred.expected_qty / total_raw_demand) * len(employees)
-                    final_predictions.append(PredictionResult(
-                        product_id=pred.product_id,
-                        expected_qty=int(round(normalized_qty)),
-                        confidence_score=pred.confidence_score
-                    ))
-            else:
-                # If all raw predictions are zero, distribute employees evenly
-                logger.warning("All raw predictions were zero. Distributing demand evenly.")
-                equal_share = len(employees) / len(presents) if len(presents) > 0 else 0
-                for pred in raw_predictions:
-                    final_predictions.append(PredictionResult(
-                        product_id=pred.product_id,
-                        expected_qty=int(round(equal_share)),
-                        confidence_score=0.1 # Low confidence
-                    ))
-
-            # Ensure the sum exactly matches total_employees due to rounding
-            total_predicted = sum(p.expected_qty for p in final_predictions)
-            if total_predicted != len(employees) and len(final_predictions) > 0:
-                diff = len(employees) - total_predicted
-                final_predictions[0].expected_qty += diff
-
-            logger.info(f"Prediction complete. Total normalized demand: {sum(p.expected_qty for p in final_predictions)} units")
-            
-            return final_predictions
+            return raw_predictions
             
         except Exception as e:
             logger.error(f"Prediction failed: {e}")
@@ -346,10 +315,7 @@ class GiftDemandPredictor:
             'shop_main_category_diversity_selected', 'shop_brand_diversity_selected',
             'shop_utility_type_diversity_selected', 'shop_sub_category_diversity_selected',
             'unique_product_combinations_in_shop',
-            'is_shop_most_frequent_main_category', 'is_shop_most_frequent_brand',
-            # Add new relativity features to numeric handling
-            'product_share_in_shop', 'brand_share_in_shop',
-            'product_rank_in_shop', 'brand_rank_in_shop'
+            'is_shop_most_frequent_main_category', 'is_shop_most_frequent_brand'
         ] + [f'interaction_hash_{i}' for i in range(10)]
         
         for col in numeric_cols:
@@ -410,11 +376,8 @@ class GiftDemandPredictor:
         IMPORTANT: The model was trained on historical selection_count which represents
         cumulative counts across all historical data for a shop/product/gender combination.
         
-        For each gender group, we weight the prediction by:
-        prediction_for_gender * gender_ratio * total_employees
-        
-        This gives us the expected quantity for each gender subgroup, which we sum
-        to get the total expected demand.
+        For each gender group, we weight the prediction by the gender ratio,
+        which gives us the expected value for each gender subgroup.
         """
         
         if len(predictions) != len(gender_ratios):
@@ -424,34 +387,23 @@ class GiftDemandPredictor:
         # Calculate weighted predictions for each gender group
         weighted_predictions = []
         for pred, ratio in zip(predictions, gender_ratios):
-            # Each prediction represents expected rate for that gender
-            # Scale by the number of employees in that gender group
-            gender_employees = ratio * total_employees
-            weighted_pred = pred * gender_employees
+            # Weight each prediction by its gender ratio
+            weighted_pred = pred * ratio
             weighted_predictions.append(weighted_pred)
         
         # Sum all gender-specific predictions
         total_prediction = np.sum(weighted_predictions)
         
-        # Apply a scaling factor to account for the difference between
-        # historical cumulative counts and single-order predictions
-        # This converts from historical aggregated counts to per-order rates
-        scaling_factor = 0.25  # Adjusted: converts cumulative counts to selection rates
-        
-        scaled_prediction = total_prediction * scaling_factor
-        
-        # Ensure non-negative and reasonable bounds
-        # Cap at total employees as upper bound (100% selection rate)
-        final_prediction = max(0, min(scaled_prediction, total_employees))
+        # Return raw prediction without any artificial scaling
+        final_prediction = max(0, total_prediction)
         
         # HEROKU DEBUG: Enhanced logging to see exact calculation values
         logger.info(f"HEROKU DEBUG - Aggregation: raw_predictions={predictions.tolist()}, "
                    f"gender_ratios={gender_ratios}, weighted_predictions={weighted_predictions}, "
-                   f"total_sum={total_prediction:.4f}, scaled={scaled_prediction:.4f}, "
-                   f"final={final_prediction:.4f}, total_employees={total_employees}")
+                   f"total_sum={total_prediction:.4f}, final={final_prediction:.4f}, "
+                   f"total_employees={total_employees}")
         
-        logger.debug(f"Aggregation: weighted_sum={total_prediction:.2f}, "
-                    f"scaled={scaled_prediction:.2f}, final={final_prediction:.2f}")
+        logger.debug(f"Aggregation: weighted_sum={total_prediction:.2f}, final={final_prediction:.2f}")
         
         return final_prediction
     

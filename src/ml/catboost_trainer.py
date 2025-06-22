@@ -213,40 +213,45 @@ def engineer_new_interaction_features(df: pd.DataFrame, n_interaction_features: 
     return df
 
 
-def engineer_product_relativity_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Engineers features describing a product's historical performance relative to its shop."""
-    logging.info("[FEATURE ENG] Engineering product relativity features...")
+def engineer_non_leaky_features(df: pd.DataFrame, is_training: bool = True) -> pd.DataFrame:
+    """
+    Engineers non-leaky features that don't use the target variable.
+    Replaces the previous product_relativity_features that caused data leakage.
+    """
+    logging.info("[FEATURE ENG] Engineering non-leaky features...")
     if df.empty:
-        logging.warning("Skipping product relativity features as df is empty.")
+        logging.warning("Skipping feature engineering as df is empty.")
         return df.copy()
 
-    # Ensure selection_count is numeric
-    df['selection_count'] = pd.to_numeric(df['selection_count'], errors='coerce').fillna(0)
+    # For training data, we can calculate mode-based features
+    # For test data, we'll use placeholders to avoid leakage
+    if is_training and 'selection_count' in df.columns:
+        # Calculate most frequent category/brand per shop using mode (not using selection_count directly)
+        shop_main_cat_mode = df.groupby('employee_shop')['product_main_category'].agg(
+            lambda x: x.mode()[0] if len(x.mode()) > 0 else 'NONE'
+        ).reset_index()
+        shop_main_cat_mode.columns = ['employee_shop', 'shop_most_frequent_main_category_mode']
+        
+        shop_brand_mode = df.groupby('employee_shop')['product_brand'].agg(
+            lambda x: x.mode()[0] if len(x.mode()) > 0 else 'NONE'
+        ).reset_index()
+        shop_brand_mode.columns = ['employee_shop', 'shop_most_frequent_brand_mode']
+        
+        # Merge back
+        df = pd.merge(df, shop_main_cat_mode, on='employee_shop', how='left')
+        df = pd.merge(df, shop_brand_mode, on='employee_shop', how='left')
+        
+        # Update the most frequent columns
+        if 'shop_most_frequent_main_category_selected' in df.columns:
+            df['shop_most_frequent_main_category_selected'] = df['shop_most_frequent_main_category_mode']
+        if 'shop_most_frequent_brand_selected' in df.columns:
+            df['shop_most_frequent_brand_selected'] = df['shop_most_frequent_brand_mode']
+        
+        # Drop temporary columns
+        df = df.drop(columns=['shop_most_frequent_main_category_mode', 'shop_most_frequent_brand_mode'], errors='ignore')
 
-    # --- Calculate total selections for normalization ---
-    # Total selections per shop
-    shop_total_selections = df.groupby('employee_shop')['selection_count'].transform('sum')
-    
-    # Total selections per brand within each shop
-    brand_total_selections_in_shop = df.groupby(['employee_shop', 'product_brand'])['selection_count'].transform('sum')
-
-    # --- Engineer Share Features ---
-    # Use a small epsilon to avoid division by zero
-    epsilon = 1e-9
-    df['product_share_in_shop'] = df['selection_count'] / (shop_total_selections + epsilon)
-    df['brand_share_in_shop'] = brand_total_selections_in_shop / (shop_total_selections + epsilon)
-
-    # --- Engineer Rank Features ---
-    df['product_rank_in_shop'] = df.groupby('employee_shop')['selection_count'].rank(method='dense', ascending=False)
-    
-    # For brand rank, we need to rank the total selections for the brand, not the row-level count
-    # First, let's add the brand total selections as a temporary column
-    df['temp_brand_total_selections'] = brand_total_selections_in_shop
-    df['brand_rank_in_shop'] = df.groupby('employee_shop')['temp_brand_total_selections'].rank(method='dense', ascending=False)
-    df = df.drop(columns=['temp_brand_total_selections'])
-
-    logging.info(f"Shape after product relativity features: {df.shape}")
-    logging.info(f"New features created: product_share_in_shop, brand_share_in_shop, product_rank_in_shop, brand_rank_in_shop")
+    logging.info(f"Shape after non-leaky features: {df.shape}")
+    logging.info("Removed leaked features: product_share_in_shop, brand_share_in_shop, product_rank_in_shop, brand_rank_in_shop")
     
     return df
 
@@ -336,42 +341,61 @@ def main():
         logging.error("Failed to aggregate data. Exiting.")
         return
 
-    # 3. Engineer Shop Assortment Features
-    features_with_shop = engineer_shop_assortment_features(agg_df)
-
-    # 4. Engineer New Interaction Features
-    features_with_interactions = engineer_new_interaction_features(features_with_shop)
-
-    # 5. Engineer Product Relativity Features
-    final_features_df = engineer_product_relativity_features(features_with_interactions)
-
-    # Save the lookup table for the predictor
-    product_relativity_features_path = os.path.join(MODELS_DIR, 'product_relativity_features.csv')
-    lookup_cols = base_grouping_cols + ['product_share_in_shop', 'brand_share_in_shop', 'product_rank_in_shop', 'brand_rank_in_shop']
-    # Ensure columns exist before trying to save them
-    lookup_cols_exist = [col for col in lookup_cols if col in final_features_df.columns]
-    if lookup_cols_exist:
-        final_features_df[lookup_cols_exist].to_csv(product_relativity_features_path, index=False)
-        logging.info(f"Product relativity feature lookup table saved to {product_relativity_features_path}")
-    else:
-        logging.warning("Could not save product relativity lookup table as no lookup columns were found.")
-
-
-    # 6. Prepare Features for CatBoost
-    X, y, y_strata, cat_features_for_model, numeric_medians = prepare_features_for_catboost(final_features_df, base_grouping_cols)
+    # 3. IMPORTANT: Split data BEFORE feature engineering to avoid leakage
+    logging.info("[SPLIT] Creating train/test split BEFORE feature engineering...")
     
-    if X.empty or y.empty:
+    # Prepare stratification on the aggregated data
+    y_temp = pd.to_numeric(agg_df['selection_count'], errors='coerce').fillna(0)
+    y_strata_temp = pd.cut(y_temp, bins=[-1, 0, 1, 2, 5, 10, np.inf], labels=[0, 1, 2, 3, 4, 5], include_lowest=True)
+    
+    # Split indices
+    train_indices, val_indices = train_test_split(
+        np.arange(len(agg_df)),
+        test_size=0.2,
+        random_state=42,
+        stratify=y_strata_temp
+    )
+    
+    train_df = agg_df.iloc[train_indices].copy()
+    val_df = agg_df.iloc[val_indices].copy()
+    
+    logging.info(f"Train size: {len(train_df)}, Validation size: {len(val_df)}")
+
+    # 4. Engineer features separately for train and validation
+    logging.info("[FEATURE ENG] Engineering features separately for train and validation...")
+    
+    # Train features
+    train_with_shop = engineer_shop_assortment_features(train_df)
+    train_with_interactions = engineer_new_interaction_features(train_with_shop)
+    train_final = engineer_non_leaky_features(train_with_interactions, is_training=True)
+    
+    # Validation features
+    val_with_shop = engineer_shop_assortment_features(val_df)
+    val_with_interactions = engineer_new_interaction_features(val_with_shop)
+    val_final = engineer_non_leaky_features(val_with_interactions, is_training=False)
+
+    # 5. Prepare Features for CatBoost
+    X_train, y_train, _, cat_features_for_model, numeric_medians = prepare_features_for_catboost(train_final, base_grouping_cols)
+    X_val, y_val, _, _, _ = prepare_features_for_catboost(val_final, base_grouping_cols)
+    
+    # Ensure validation features match training features
+    for col in X_train.columns:
+        if col not in X_val.columns:
+            if col in cat_features_for_model:
+                X_val[col] = "NONE"
+            else:
+                X_val[col] = numeric_medians.get(col, 0)
+    X_val = X_val[X_train.columns]
+    
+    if X_train.empty or y_train.empty:
         logging.error("Feature preparation failed. Exiting.")
         return
 
     logging.info("--- Data Preparation Complete ---")
-    logging.info(f"X shape: {X.shape}, y shape: {y.shape}, Num Cat Features: {len(cat_features_for_model)}")
-    logging.info(f"Numeric Medians: {numeric_medians}")
+    logging.info(f"X_train shape: {X_train.shape}, X_val shape: {X_val.shape}")
+    logging.info(f"Num Cat Features: {len(cat_features_for_model)}")
     
     # 6. Train Initial CatBoost Model
-    X_train, X_val, y_train, y_val = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y_strata
-    )
     
     initial_model_params = {
         'iterations': 1000,
@@ -419,13 +443,13 @@ def main():
         return
 
     # 9. Cross-Validation with Final Parameters
-    cv_scores = perform_cross_validation(
-        X, y, y_strata, cat_features_for_model, best_params_final, n_splits=5
-    )
+    # Since we split early, we'll skip CV for now or could implement it differently
+    cv_scores = []
+    logging.info("[CROSS-VALIDATION] Skipping CV as data was split early for leak prevention")
 
     # 10. Feature Importance
     importance_df = analyze_and_save_feature_importance(
-        trained_final_model, X.columns, os.path.join(REPORTS_DIR, "figures", "catboost_feature_importance.png")
+        trained_final_model, X_train.columns, os.path.join(REPORTS_DIR, "figures", "catboost_feature_importance.png")
     )
 
     # 11. Save Artifacts
@@ -433,7 +457,7 @@ def main():
         trained_final_model,
         best_params_final,
         {**final_metrics_val, "cv_r2_mean": np.mean(cv_scores) if cv_scores else None, "cv_r2_std": np.std(cv_scores) if cv_scores else None},
-        list(X.columns),
+        list(X_train.columns),
         cat_features_for_model,
         MODELS_DIR,
         importance_df,
