@@ -1,21 +1,22 @@
 """
 Gift Demand Predictor Service
 
-Main ML service for predicting gift demand quantities using CatBoost model.
-Handles feature engineering, shop context resolution, and prediction aggregation.
+Main ML service for predicting gift demand selection rates using a CatBoost model.
+Handles feature engineering, shop context resolution, and scales predicted rates to expected quantities.
 """
 
 import pandas as pd
 import numpy as np
 from catboost import CatBoostRegressor, Pool
 from sklearn.feature_extraction import FeatureHasher
-from typing import List, Dict, Optional
+from typing import List, Dict # Optional is not needed for Python 3.10+ with `| None`
 import logging
 import os
 import pickle
 
 from .shop_features import ShopFeatureResolver
-from ..api.schemas.responses import PredictionResult
+# PredictionResult is no longer directly used for internal return types
+# from ..api.schemas.responses import PredictionResult
 
 logger = logging.getLogger(__name__)
 
@@ -35,33 +36,11 @@ class GiftDemandPredictor:
         self.model = None
         self.shop_resolver = None
         self.hasher = FeatureHasher(n_features=10, input_type='string')
+        self.model_rmse: float | None = None # To store model RMSE, using Python 3.10+ union type
         
         self.numeric_medians: Dict[str, float] = {} # Initialize numeric_medians
-        
-        # Feature configuration matching training pipeline
-        self.expected_columns = [
-            'employee_shop', 'employee_branch', 'employee_gender',
-            'product_main_category', 'product_sub_category', 'product_brand',
-            'product_color', 'product_durability', 'product_target_gender',
-            'product_utility_type', 'product_type',
-            'shop_main_category_diversity_selected', 'shop_brand_diversity_selected',
-            'shop_utility_type_diversity_selected', 'shop_sub_category_diversity_selected',
-            'shop_most_frequent_main_category_selected', 'shop_most_frequent_brand_selected',
-            'unique_product_combinations_in_shop',
-            'is_shop_most_frequent_main_category', 'is_shop_most_frequent_brand',
-            # Product relativity features (will be filled with defaults if not present from snapshot)
-            'product_share_in_shop', 'brand_share_in_shop',
-            'product_rank_in_shop', 'brand_rank_in_shop'
-        ] + [f'interaction_hash_{i}' for i in range(10)]
-        
-        # Categorical features (must match training)
-        self.categorical_features = [
-            'employee_shop', 'employee_branch', 'employee_gender',
-            'product_main_category', 'product_sub_category', 'product_brand',
-            'product_color', 'product_durability', 'product_target_gender',
-            'product_utility_type', 'product_type',
-            'shop_most_frequent_main_category_selected', 'shop_most_frequent_brand_selected'
-        ]
+        self.expected_columns: List[str] = [] # To be loaded from metadata
+        self.categorical_features: List[str] = [] # To be loaded from metadata
         
         # Initialize components
         self._load_model() # This also loads numeric_medians from metadata
@@ -97,8 +76,39 @@ class GiftDemandPredictor:
                 else:
                     logger.info(f"Numeric medians loaded successfully: {list(self.numeric_medians.keys())}")
 
+                # Load model RMSE from metadata
+                performance_metrics = metadata.get('performance_metrics', {})
+                self.model_rmse = performance_metrics.get('rmse_validation')
+                if self.model_rmse is not None:
+                    logger.info(f"Model RMSE loaded successfully: {self.model_rmse:.4f}")
+                else:
+                    logger.warning("Model RMSE (rmse_validation) not found in metadata. Confidence score might be affected.")
+                    self.model_rmse = 0.3 # Default RMSE if not found
+                
+                # Load expected_columns and categorical_features from metadata
+                self.expected_columns = metadata.get('features_used', [])
+                self.categorical_features = metadata.get('categorical_features_in_model', [])
+
+                if not self.expected_columns:
+                    logger.error("CRITICAL: 'features_used' not found in model metadata. Predictor may not function correctly.")
+                    # Potentially raise an error here or fallback to a default, but error is safer.
+                    # For now, it will proceed with an empty list, likely causing downstream errors.
+                else:
+                    logger.info(f"Expected columns loaded successfully ({len(self.expected_columns)} columns).")
+
+                if not self.categorical_features:
+                    logger.warning("'categorical_features_in_model' not found or empty in model metadata.")
+                    # This might be acceptable if the model has no categorical features,
+                    # or it might indicate an issue with metadata.
+                else:
+                    logger.info(f"Categorical features loaded successfully ({len(self.categorical_features)} features).")
+
         except FileNotFoundError as e:
             logger.error(f"Error loading model/metadata: {e}")
+            self.model_rmse = 0.3 # Default RMSE on file not found
+            # If metadata file is not found, expected_columns and categorical_features will remain empty.
+            # This will likely cause errors downstream, which is a desired failure mode.
+            logger.error("CRITICAL: Model metadata file not found. Expected columns and categorical features could not be loaded.")
             raise
         except Exception as e:
             logger.error(f"An unexpected error occurred while loading model/metadata: {e}")
@@ -106,6 +116,16 @@ class GiftDemandPredictor:
             if not hasattr(self, 'numeric_medians') or self.numeric_medians is None:
                  self.numeric_medians = {}
                  logger.warning("numeric_medians initialized to empty due to an error during loading.")
+            if not hasattr(self, 'model_rmse') or self.model_rmse is None:
+                 self.model_rmse = 0.3 # Default RMSE on other errors
+                 logger.warning(f"model_rmse initialized to default {self.model_rmse} due to an error during loading.")
+            # Ensure expected_columns and categorical_features are at least empty lists on error
+            if not hasattr(self, 'expected_columns') or self.expected_columns is None:
+                self.expected_columns = []
+                logger.error("CRITICAL: Expected columns list is empty due to an error during model/metadata loading.")
+            if not hasattr(self, 'categorical_features') or self.categorical_features is None:
+                self.categorical_features = []
+                logger.warning("Categorical features list is empty due to an error during model/metadata loading.")
             raise
     
     def _initialize_shop_resolver(self):
@@ -132,7 +152,7 @@ class GiftDemandPredictor:
                  logger.warning("ShopFeatureResolver initialized with potentially invalid path due to earlier error.")
             # raise # Optionally re-raise if resolver is critical for any operation
     
-    def predict(self, branch: str, presents: List[Dict], employees: List[Dict]) -> List[PredictionResult]:
+    def predict(self, branch: str, presents: List[Dict], employees: List[Dict]) -> List[Dict]:
         """
         Make predictions for gift demand.
         
@@ -142,7 +162,7 @@ class GiftDemandPredictor:
             employees: List of employee dictionaries with gender information
             
         Returns:
-            List of PredictionResult objects with quantity predictions
+            List of prediction dictionaries with quantity predictions
         """
         try:
             logger.info(f"Making predictions for {len(presents)} presents and {len(employees)} employees")
@@ -165,14 +185,14 @@ class GiftDemandPredictor:
                     
                 except Exception as e:
                     logger.error(f"Failed to predict for present {present.get('id', 'unknown')}: {e}")
-                    raw_predictions.append(PredictionResult(
-                        product_id=str(present.get('id', 'unknown')),
-                        expected_qty=0,
-                        confidence_score=0.0
-                    ))
+                    raw_predictions.append({
+                        "product_id": str(present.get('id', 'unknown')),
+                        "expected_qty": 0,
+                        "confidence_score": 0.0
+                    })
 
             # Return raw predictions without normalization
-            logger.info(f"Prediction complete. Total raw demand: {sum(p.expected_qty for p in raw_predictions)} units")
+            logger.info(f"Prediction complete. Total raw demand: {sum(p['expected_qty'] for p in raw_predictions)} units")
             
             return raw_predictions
             
@@ -180,11 +200,11 @@ class GiftDemandPredictor:
             logger.error(f"Prediction failed: {e}")
             # Return zero predictions for all presents
             return [
-                PredictionResult(
-                    product_id=str(present.get('id', 'unknown')),
-                    expected_qty=0,
-                    confidence_score=0.0
-                )
+                {
+                    "product_id": str(present.get('id', 'unknown')),
+                    "expected_qty": 0,
+                    "confidence_score": 0.0
+                }
                 for present in presents
             ]
     
@@ -202,8 +222,8 @@ class GiftDemandPredictor:
         return gender_counts
     
     def _predict_for_present(self, present: Dict, employee_gender_counts: Dict[str, int],
-                           branch: str, shop_features: Dict) -> PredictionResult:
-        """Make prediction for a single present"""
+                           branch: str, shop_features: Dict) -> Dict:
+        """Make prediction for a single present, returning a dictionary."""
         
         present_id = present.get('id', 'unknown')
         logger.debug(f"Predicting for present {present_id}")
@@ -221,11 +241,11 @@ class GiftDemandPredictor:
         
         if not rows:
             logger.warning(f"No valid employee data for present {present_id}")
-            return PredictionResult(
-                product_id=str(present_id),
-                expected_qty=0,
-                confidence_score=0.0
-            )
+            return {
+                "product_id": str(present_id),
+                "expected_qty": 0,
+                "confidence_score": 0.0
+            }
         
         # Create DataFrame and add interaction features
         feature_df = pd.DataFrame(rows)
@@ -246,19 +266,19 @@ class GiftDemandPredictor:
             # Calculate confidence
             confidence = self._calculate_confidence(predicted_rates, len(rows))
             
-            return PredictionResult(
-                product_id=str(present_id),
-                expected_qty=total_prediction,
-                confidence_score=round(confidence, 2)
-            )
+            return {
+                "product_id": str(present_id),
+                "expected_qty": total_prediction,
+                "confidence_score": round(confidence, 2)
+            }
             
         except Exception as e:
             logger.error(f"Prediction error for present {present_id}: {e}")
-            return PredictionResult(
-                product_id=str(present_id),
-                expected_qty=0,
-                confidence_score=0.0
-            )
+            return {
+                "product_id": str(present_id),
+                "expected_qty": 0,
+                "confidence_score": 0.0
+            }
     
     def _create_feature_vector(self, present: Dict, employee_gender: str,
                              branch: str, shop_features: Dict) -> Dict:
@@ -323,6 +343,8 @@ class GiftDemandPredictor:
     def _prepare_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Ensure features match model expectations"""
         
+        initial_columns = set(df.columns) # Store initial columns for logging later
+        
         # Convert categorical columns to string
         for col in self.categorical_features:
             if col in df.columns:
@@ -363,8 +385,10 @@ class GiftDemandPredictor:
                     df[col] = 0.0
                     logger.error(f"CRITICAL: Expected column '{col}' was missing from input DataFrame AND its median was not in loaded numeric_medians. Defaulted to 0.0. This may indicate a schema mismatch or an issue with saved model artifacts.")
                 # Original warning for missing column, now more contextual based on median presence
-                if not (col in self.numeric_medians or col in self.categorical_features or col.endswith('_rank_in_shop')):
-                     logger.warning(f"Column '{col}' was missing from input DataFrame and not found in medians/categoricals. Defaulted to '{df[col].iloc[0] if len(df)>0 and isinstance(df[col], pd.Series) else df[col] }'.")
+                # This specific warning for defaulting based on iloc[0] is less reliable now with more robust defaulting.
+                # The CRITICAL error above is more important.
+                # if not (col in self.numeric_medians or col in self.categorical_features or col.endswith('_rank_in_shop')):
+                #      logger.warning(f"Column '{col}' was missing from input DataFrame and not found in medians/categoricals. Defaulted to '{df[col].iloc[0] if len(df)>0 and isinstance(df[col], pd.Series) else df[col] }'.")
         
         # Reorder columns to match training, ensure all expected columns are present
         df = df.reindex(columns=self.expected_columns, fill_value=0) # fill_value for any still missed numeric
@@ -376,7 +400,10 @@ class GiftDemandPredictor:
                       df[col] = "NONE"
                  df[col] = df[col].astype(str)
 
-
+        # Log columns that were added because they were in expected_columns but not in initial_columns
+        added_columns = set(self.expected_columns) - initial_columns
+        if added_columns:
+            logger.info(f"Columns added to DataFrame to match expected schema (filled with defaults/medians): {sorted(list(added_columns))}")
         
         return df
     
@@ -421,30 +448,29 @@ class GiftDemandPredictor:
         return max(0, total_expected_qty)
     
     def _calculate_confidence(self, predictions: np.ndarray, num_groups: int) -> float:
-        """Calculate prediction confidence score"""
+        """
+        Calculate prediction confidence score based on model RMSE.
+        A lower RMSE (better model performance) results in higher confidence.
+        """
         
-        if len(predictions) == 0:
-            return 0.0
+        if self.model_rmse is None:
+            logger.warning("Model RMSE is not available. Returning default low confidence.")
+            return 0.5 # Default low confidence if RMSE is missing
+            
+        # Map RMSE to confidence: 0.5 + 0.45 * exp(-4.05 * RMSE)
+        # This maps RMSE to a range of [0.5, 0.95]
+        # RMSE = 0 -> confidence = 0.5 + 0.45 * 1 = 0.95
+        # RMSE = 0.2 -> confidence = 0.5 + 0.45 * exp(-0.81) ~ 0.5 + 0.45 * 0.444 ~ 0.5 + 0.20 = 0.70
+        # RMSE = 0.4 -> confidence = 0.5 + 0.45 * exp(-1.62) ~ 0.5 + 0.45 * 0.197 ~ 0.5 + 0.09 = 0.59
+        # RMSE -> large, confidence -> 0.5
         
-        if num_groups == 1:
-            # Single prediction - base confidence
-            return 0.8
+        k = 4.05
+        confidence = 0.5 + 0.45 * np.exp(-k * self.model_rmse)
         
-        # Multi-group prediction - confidence based on consistency
-        prediction_mean = np.mean(predictions)
-        prediction_std = np.std(predictions)
+        # Ensure confidence is within a sensible range, e.g., [0.5, 0.95]
+        confidence = np.clip(confidence, 0.5, 0.95)
         
-        # Higher consistency = higher confidence
-        if prediction_mean > 0:
-            consistency_factor = 1 - (prediction_std / prediction_mean)
-            consistency_factor = np.clip(consistency_factor, 0, 1)
-        else:
-            consistency_factor = 0.5
-        
-        # Base confidence (0.7) + consistency bonus (up to 0.25)
-        confidence = 0.7 + (0.25 * consistency_factor)
-        
-        return min(0.95, confidence)
+        return float(confidence)
 
 # Force fresh instances to avoid caching issues during development
 _predictor_instance = None
@@ -461,9 +487,13 @@ def get_predictor(model_path: str = "models/catboost_rmse_model/catboost_rmse_mo
     """
     global _predictor_instance
     
-    # Always create fresh instance to avoid caching issues
-    logger.info("Creating fresh predictor instance to ensure latest code changes")
-    # The historical_data_path is no longer needed here, as ShopFeatureResolver uses model_dir
-    _predictor_instance = GiftDemandPredictor(model_path)
-    
+    if _predictor_instance is None:
+        logger.info(f"No existing predictor instance found. Creating new instance with model: {model_path}")
+        _predictor_instance = GiftDemandPredictor(model_path)
+        logger.info("Predictor instance created and cached.")
+    else:
+        # Optional: Check if model_path has changed, though typically it won't for a running server.
+        # If it could change, logic to re-initialize would be needed here or via a separate reload mechanism.
+        logger.debug("Returning cached predictor instance.")
+        
     return _predictor_instance

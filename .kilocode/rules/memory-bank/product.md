@@ -23,9 +23,9 @@ The system is designed as a machine learning-powered demand prediction engine th
 2.  **Data Processing & Classification:**
     *   Historical data is preprocessed and aggregated to identify patterns.
     *   For new prediction requests, input data (gift descriptions, employee names) is classified into structured features (e.g., gift attributes via OpenAI, employee gender via `gender_guesser`).
-3.  **Prediction Generation:** A machine learning model (CatBoost Regressor) generates a "popularity score" for each gift, weighted by employee gender ratios.
-4.  **Prediction Normalization:** These scores are then normalized across all available gifts to ensure the final sum of `expected_qty` matches the total number of employees.
-5.  **API Output:** The final, normalized predictions are delivered via a RESTful API.
+3.  **Prediction Generation (Selection Rate):** A machine learning model (CatBoost Regressor) predicts a `selection_rate` (a value between 0 and 1) for each gift, considering employee gender groups.
+4.  **Prediction Scaling & Aggregation:** The predicted `selection_rate` for each gift-gender combination is scaled by the number of employees in that gender subgroup to get an expected count. These counts are then summed to get the total `expected_qty` for the gift. Normalization to match total employees is **not** performed post-prediction.
+5.  **API Output:** The final expected quantities and confidence scores are delivered via a RESTful API.
 
 ### API Flow (Conceptual):
 
@@ -49,13 +49,13 @@ The system is designed as a machine learning-powered demand prediction engine th
     *   Gifts are classified into attributes (e.g., `itemMainCategory`, `color`, `brand`).
     *   Employee names are processed to determine gender.
     *   Shop-specific features and historical context are resolved.
-3.  **Prediction by ML Model (Raw Scores):** The model calculates a gender-weighted popularity score for each gift.
-4.  **Normalization:** The raw scores are summed, and each individual score is normalized against the total to ensure the final sum of `expected_qty` equals `total_employees`.
+3.  **Prediction by ML Model (Selection Rates):** The model predicts a `selection_rate` for each gift-gender combination.
+4.  **Scaling & Aggregation:** The predicted rates are scaled by employee counts per gender subgroup and then summed to get the `expected_qty` for each gift. No further normalization is applied.
 5.  **API Response:**
     ```json
     [
-      {"product_id" : "P101", "expected_qty" : 25, "confidence_score": 0.85},
-      // ... other predictions
+      {"product_id" : "P101", "expected_qty" : 25, "confidence_score": 0.75},
+      // ... other predictions (confidence_score typically between 0.5 and 0.95)
     ]
     ```
 

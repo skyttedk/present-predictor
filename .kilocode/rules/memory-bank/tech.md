@@ -18,7 +18,7 @@
 
 ### Machine Learning
 - **CatBoost**: Gradient boosting framework
-  - `CatBoostRegressor` for demand quantity prediction (using Poisson loss as per [`src/ml/catboost_trainer.py`](src/ml/catboost_trainer.py:1) and [`src/config/settings.py`](src/config/settings.py:105)).
+  - `CatBoostRegressor` for predicting `selection_rate` (using `RMSE` loss as per [`src/ml/catboost_trainer.py`](src/ml/catboost_trainer.py:1)).
   - Native handling of categorical features.
   - Built-in feature importance analysis.
   - Cross-validation support.
