@@ -35,8 +35,12 @@ class GiftDemandPredictor:
         self.model_path = model_path
         self.model = None
         self.shop_resolver = None
-        self.hasher = FeatureHasher(n_features=32, input_type='string')
-        self.model_rmse: float | None = None # To store model RMSE, using Python 3.10+ union type
+        # Interaction hasher constants for clarity
+        self.HASH_DIM_PER_SET = 32
+        self.NUM_HASH_SETS = 3
+        self.hasher = FeatureHasher(n_features=self.HASH_DIM_PER_SET, input_type='string')
+        self.model_rmse: float | None = None # To store model RMSE for legacy compatibility
+        self.model_poisson: float | None = None # To store model Poisson deviance (primary metric)
         
         self.numeric_medians: Dict[str, float] = {} # Initialize numeric_medians
         self.expected_columns: List[str] = [] # To be loaded from metadata
@@ -76,14 +80,22 @@ class GiftDemandPredictor:
                 else:
                     logger.info(f"Numeric medians loaded successfully: {list(self.numeric_medians.keys())}")
 
-                # Load model RMSE from metadata
+                # Load model performance metrics from metadata
                 performance_metrics = metadata.get('performance_metrics', {})
                 self.model_rmse = performance_metrics.get('rmse_validation')
+                self.model_poisson = performance_metrics.get('poisson_deviance')
+                
                 if self.model_rmse is not None:
                     logger.info(f"Model RMSE loaded successfully: {self.model_rmse:.4f}")
                 else:
                     logger.warning("Model RMSE (rmse_validation) not found in metadata. Confidence score might be affected.")
                     self.model_rmse = 0.3 # Default RMSE if not found
+                    
+                if self.model_poisson is not None:
+                    logger.info(f"Model Poisson deviance loaded successfully: {self.model_poisson:.4f}")
+                else:
+                    logger.warning("Model Poisson deviance not found in metadata.")
+                    self.model_poisson = 3.5 # Default Poisson deviance if not found
                 
                 # Load expected_columns and categorical_features from metadata
                 self.expected_columns = metadata.get('features_used', [])
@@ -269,7 +281,7 @@ class GiftDemandPredictor:
             )
             
             # Calculate confidence
-            confidence = self._calculate_confidence(predicted_counts, len(rows))
+            confidence = self._calculate_confidence(predicted_counts)
             
             return {
                 "product_id": str(present_id),
@@ -315,7 +327,8 @@ class GiftDemandPredictor:
         """Add hashed interaction features using sub-tokens."""
         if df.empty:
             # Add empty hash columns if df is empty to maintain schema
-            for i in range(self.hasher.n_features):
+            total_hash_features = self.HASH_DIM_PER_SET * self.NUM_HASH_SETS  # 96 total
+            for i in range(total_hash_features):
                 df[f'interaction_hash_{i}'] = 0.0
             return df
 
@@ -372,9 +385,7 @@ class GiftDemandPredictor:
                 df[col] = df[col].astype(str).fillna("NONE")
         
         # Ensure numeric columns - Fix C4: Enumerate all 96 hash features (32 * 3 interaction sets)
-        INTERACTION_HASH_DIM = 32
-        NUM_INTERACTION_SETS = 3
-        num_hash_features = INTERACTION_HASH_DIM * NUM_INTERACTION_SETS  # 96
+        num_hash_features = self.HASH_DIM_PER_SET * self.NUM_HASH_SETS  # 96
         
         numeric_cols = [
             'shop_main_category_diversity_selected', 'shop_brand_diversity_selected',
@@ -481,9 +492,10 @@ class GiftDemandPredictor:
             confidence = 0.5
         return np.clip(confidence, 0.5, 0.95)
     
-    def _calculate_confidence(self, predictions: np.ndarray, num_groups: int) -> float:
+    def _calculate_confidence(self, predictions: np.ndarray) -> float:
         """
         Calculate prediction confidence score - updated for Poisson model.
+        Removed unused num_groups parameter as recommended by expert.
         """
         # Use Poisson-based confidence calculation since model now predicts counts
         return self._calculate_confidence_poisson(predictions)
@@ -491,7 +503,7 @@ class GiftDemandPredictor:
 # Force fresh instances to avoid caching issues during development
 _predictor_instance = None
 
-def get_predictor(model_path: str = "models/catboost_rmse_model/catboost_rmse_model.cbm") -> GiftDemandPredictor:
+def get_predictor(model_path: str = "models/catboost_poisson_model/catboost_poisson_model.cbm") -> GiftDemandPredictor:
     """
     Get predictor instance. Creates fresh instance to ensure latest code changes are applied.
     

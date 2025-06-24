@@ -33,8 +33,8 @@ import optuna
 # --- Configuration ---
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) # Should point to project root
 DATA_PATH = os.path.join(BASE_DIR, "src/data/historical/present.selection.historic.csv")
-MODELS_DIR = os.path.join(BASE_DIR, "models", "catboost_rmse_model")
-REPORTS_DIR = os.path.join(BASE_DIR, "reports", "catboost_rmse")
+MODELS_DIR = os.path.join(BASE_DIR, "models", "catboost_poisson_model")
+REPORTS_DIR = os.path.join(BASE_DIR, "reports", "catboost_poisson")
 LOGS_DIR = os.path.join(BASE_DIR, "logs")
 
 # Create directories if they don't exist
@@ -261,7 +261,10 @@ def engineer_new_interaction_features(df: pd.DataFrame, n_interaction_features: 
         logging.warning("Skipping new interaction feature engineering as input df is empty.")
         return df.copy()
 
-    hasher = FeatureHasher(n_features=n_interaction_features, input_type='string')
+    # Use consistent constants for clarity
+    HASH_DIM_PER_SET = 32
+    NUM_HASH_SETS = 3
+    hasher = FeatureHasher(n_features=HASH_DIM_PER_SET, input_type='string')
     
     # Create multiple interaction sets for better signal capture
     # First set: shop x main_category
@@ -378,9 +381,9 @@ def prepare_features_for_catboost(final_features_df: pd.DataFrame, grouping_cols
             logging.warning(f"Categorical feature '{col}' intended for CatBoost not found in X.")
     
     # C4 Fix: Enumerate all 96 hash features (32 * 3 interaction sets)
-    INTERACTION_HASH_DIM = 32
-    NUM_INTERACTION_SETS = 3
-    num_hash_features = INTERACTION_HASH_DIM * NUM_INTERACTION_SETS  # 96
+    HASH_DIM_PER_SET = 32
+    NUM_HASH_SETS = 3
+    num_hash_features = HASH_DIM_PER_SET * NUM_HASH_SETS  # 96
     
     # Define expected numeric columns including all hash features
     expected_numeric_cols = [
@@ -846,10 +849,14 @@ def tune_hyperparameters_optuna(X_train, y_train, X_val, y_val, exposure_train, 
             verbose=0
         )
         
-        # Use weighted validation loss for optimization
-        y_pred_val = model.predict(X_val)
-        weighted_mse = np.average((y_pred_val - y_val) ** 2, weights=exposure_val)
-        return weighted_mse
+        # For completeness, use Poisson score for optimization as recommended
+        try:
+            return model.best_score_["validation"]["Poisson"]
+        except (KeyError, AttributeError):
+            # Fallback to weighted MSE if Poisson score unavailable
+            y_pred_val = model.predict(X_val)
+            weighted_mse = np.average((y_pred_val - y_val) ** 2, weights=exposure_val)
+            return weighted_mse
 
     # Create study with MedianPruner
     study = optuna.create_study(
@@ -927,7 +934,7 @@ def save_model_artifacts(model, params, metrics, feature_list, cat_feature_list,
     """Saves the trained model, parameters, metrics, numeric medians, and other metadata."""
     logging.info(f"[SAVE] Saving model artifacts to {model_dir}...")
 
-    model_path = os.path.join(model_dir, 'catboost_rmse_model.cbm')
+    model_path = os.path.join(model_dir, 'catboost_poisson_model.cbm')
     model.save_model(model_path)
     logging.info(f"Trained model saved to: {model_path}")
 
