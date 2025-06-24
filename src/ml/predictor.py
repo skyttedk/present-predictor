@@ -59,6 +59,10 @@ class GiftDemandPredictor:
                 raise FileNotFoundError(f"Model file not found at {self.model_path}")
             
             logger.info(f"Loading CatBoost model from {self.model_path}")
+            logger.info(f"Model file exists: {os.path.exists(self.model_path)}")
+            if os.path.exists(self.model_path):
+                logger.info(f"Model file size: {os.path.getsize(self.model_path)} bytes")
+                logger.info(f"Model file modified: {os.path.getmtime(self.model_path)}")
             self.model = CatBoostRegressor()
             self.model.load_model(self.model_path)
             logger.info("Model loaded successfully.")
@@ -532,6 +536,12 @@ def get_predictor(model_path: str = "models/catboost_poisson_model/catboost_pois
         GiftDemandPredictor instance
     """
     global _predictor_instance
+    
+    # Debug: Show working directory and path resolution
+    logger.info(f"DEBUG: Current working directory: {os.getcwd()}")
+    logger.info(f"DEBUG: Requested model path: {model_path}")
+    abs_model_path = os.path.abspath(model_path)
+    logger.info(f"DEBUG: Absolute model path: {abs_model_path}")
     
     if _predictor_instance is None:
         logger.info(f"No existing predictor instance found. Creating new instance with model: {model_path}")

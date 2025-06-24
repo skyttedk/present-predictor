@@ -44,7 +44,7 @@ async def force_api_reload():
     
     # Use the provided API key
     api_key = "31nl-iINTiAY4bZYlUq53h7qRQ3D_PHIS6aJGSKOYDQ"
-    api_url = "http://localhost:8000"  # Adjust if different
+    api_url = "http://localhost:9050"  # Updated to match your running API
     headers = {"X-API-Key": api_key}
     
     async with httpx.AsyncClient() as client:

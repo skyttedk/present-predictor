@@ -121,3 +121,27 @@ All 6 critical blocking issues have been successfully resolved and end-to-end va
 -   ✅ **Business Logic**: Sum(predictions) = 22.5 ≠ employee_count (100) - no artificial normalization
 -   ✅ **Model Version**: v2.0 with all Priority 2 fixes applied and validated
 -   ✅ **Performance**: Confidence scores 0.93-0.95, diverse non-uniform predictions
+
+## ✅ SMOKE TEST REWRITE COMPLETED - June 25, 2025 00:37:45
+**Task**: Resolved inconsistency between smoke test and API endpoint results by eliminating duplicate classification logic.
+
+### Problem Resolution
+- **Root Cause Identified**: Smoke test used hardcoded manual classifications while API used real OpenAI Assistant pipeline
+- **Original Issue**: Same prediction test produced different results through different execution paths
+- **Solution Applied**: Completely rewrote smoke test to make HTTP requests to API endpoint instead of duplicating logic
+
+### Implementation Success
+- ✅ **API Integration**: Smoke test now calls `POST http://127.0.0.1:9050/predict` with proper authentication
+- ✅ **Schema Alignment**: Updated payload to use `"presents"` field matching `PredictRequest` schema
+- ✅ **Response Validation**: Fixed validation to handle `PredictionResponse` dict format with `"predictions"` list
+- ✅ **Authentication**: Added X-API-Key header with provided API key
+- ✅ **Consistent Results**: Both execution paths now use identical OpenAI classification pipeline
+
+### Validation Results (June 25, 2025 00:37:45)
+- **Test Data**: 19 presents, 57 employees for CVR '28892055'
+- **Total Predicted**: 51.0 units (0.90 average per employee)
+- **Response Format**: All validations pass (dict with 19 predictions, required fields, non-negative values)
+- **Top Predictions**: Range 2.3-3.2 units with good distribution (0/19 zero predictions)
+- **Business Logic**: No artificial normalization applied, predictions based on model output
+
+**Status**: ✅ **COMPLETED** - Smoke test now provides consistent results with API endpoint, eliminating classification pipeline discrepancies.
