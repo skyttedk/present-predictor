@@ -35,7 +35,7 @@ class GiftDemandPredictor:
         self.model_path = model_path
         self.model = None
         self.shop_resolver = None
-        self.hasher = FeatureHasher(n_features=10, input_type='string')
+        self.hasher = FeatureHasher(n_features=32, input_type='string')
         self.model_rmse: float | None = None # To store model RMSE, using Python 3.10+ union type
         
         self.numeric_medians: Dict[str, float] = {} # Initialize numeric_medians
@@ -175,11 +175,16 @@ class GiftDemandPredictor:
             
             for present in presents:
                 try:
-                    # Step 1: Get raw, un-normalized prediction for each present
-                    shop_and_product_features = self.shop_resolver.get_shop_features(None, branch, present)
+                    # Step 1: Get shop features using simplified resolver
+                    shop_features = self.shop_resolver.resolve_features(
+                        shop_id=branch,  # Shop ID is now branch (consolidated)
+                        main_category=present.get('item_main_category', 'NONE'),
+                        sub_category=present.get('item_sub_category', 'NONE'),
+                        brand=present.get('brand', 'NONE')
+                    )
                     
                     prediction = self._predict_for_present(
-                        present, employee_stats, branch, shop_and_product_features
+                        present, employee_stats, branch, shop_features
                     )
                     raw_predictions.append(prediction)
                     
@@ -285,10 +290,11 @@ class GiftDemandPredictor:
         """Create feature vector for one present-employee combination"""
         
         # Base features matching training data structure
-        # Since we don't have a real shop_id during prediction, use branch code as placeholder
+        # Shop and branch are now identical per expert feedback
+        employee_shop = branch  # Shop and branch are now consolidated
+        
         features = {
-            'employee_shop': branch,  # Use branch as shop placeholder
-            'employee_branch': branch,
+            'employee_shop': employee_shop,
             'employee_gender': employee_gender,
             'product_main_category': present.get('item_main_category', 'NONE'),
             'product_sub_category': present.get('item_sub_category', 'NONE'),
@@ -300,16 +306,8 @@ class GiftDemandPredictor:
             'product_type': present.get('usage_type', 'NONE')
         }
         
-        # Add shop-level features
+        # Add shop-level features (binary indicators are already included in shop_features)
         features.update(shop_features)
-        
-        # Add binary indicator features
-        features['is_shop_most_frequent_main_category'] = int(
-            present.get('item_main_category') == shop_features.get('shop_most_frequent_main_category_selected')
-        )
-        features['is_shop_most_frequent_brand'] = int(
-            present.get('brand') == shop_features.get('shop_most_frequent_brand_selected')
-        )
         
         return features
     
@@ -321,22 +319,45 @@ class GiftDemandPredictor:
                 df[f'interaction_hash_{i}'] = 0.0
             return df
 
-        # Create sub-tokens for better hashing
-        # Ensure columns exist, use 'NONE' as fallback
-        interaction_tokens = df.apply(
+        # Create multiple interaction sets for better signal capture
+        # First set: shop x main_category (existing)
+        interaction1 = df.apply(
             lambda x: [
-                f"branch_{x.get('employee_branch', 'NONE')}",
+                f"shop_{x.get('employee_shop', 'NONE')}",
                 f"cat_{x.get('product_main_category', 'NONE')}"
             ],
             axis=1
         )
         
-        # Hash interactions
-        hashed_features = self.hasher.transform(interaction_tokens).toarray()
+        # Second set: brand x target_gender
+        interaction2 = df.apply(
+            lambda x: [
+                f"brand_{x.get('product_brand', 'NONE')}",
+                f"gender_{x.get('product_target_gender', 'NONE')}"
+            ],
+            axis=1
+        )
+        
+        # Third set: sub_category x utility_type
+        interaction3 = df.apply(
+            lambda x: [
+                f"subcat_{x.get('product_sub_category', 'NONE')}",
+                f"utility_{x.get('product_utility_type', 'NONE')}"
+            ],
+            axis=1
+        )
+        
+        # Hash all interaction sets
+        hash1 = self.hasher.transform(interaction1).toarray()
+        hash2 = self.hasher.transform(interaction2).toarray()
+        hash3 = self.hasher.transform(interaction3).toarray()
+        
+        # Combine all hashes
+        all_hashes = np.hstack([hash1, hash2, hash3])
         
         # Add as columns
-        for i in range(hashed_features.shape[1]):
-            df[f'interaction_hash_{i}'] = hashed_features[:, i]
+        for i in range(all_hashes.shape[1]):
+            df[f'interaction_hash_{i}'] = all_hashes[:, i]
         
         return df
     
@@ -358,7 +379,7 @@ class GiftDemandPredictor:
             'is_shop_most_frequent_main_category', 'is_shop_most_frequent_brand',
             'product_share_in_shop', 'brand_share_in_shop',
             'product_rank_in_shop', 'brand_rank_in_shop'
-        ] + [f'interaction_hash_{i}' for i in range(10)]
+        ] + [f'interaction_hash_{i}' for i in range(32)]
         
         for col in numeric_cols:
             if col in df.columns:
@@ -475,7 +496,7 @@ class GiftDemandPredictor:
 # Force fresh instances to avoid caching issues during development
 _predictor_instance = None
 
-def get_predictor(model_path: str = "models/catboost_rmse_model/catboost_rmse_model.cbm") -> GiftDemandPredictor:
+def get_predictor(model_path: str = "models/catboost_poisson_model/catboost_poisson_model.cbm") -> GiftDemandPredictor:
     """
     Get predictor instance. Creates fresh instance to ensure latest code changes are applied.
     

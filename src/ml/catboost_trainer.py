@@ -254,8 +254,8 @@ def engineer_shop_assortment_features(
     logging.info(f"Shape after shop features: {df_with_features.shape}")
     return df_with_features
 
-def engineer_new_interaction_features(df: pd.DataFrame, n_interaction_features: int = 10) -> pd.DataFrame:
-    """Engineers new interaction features using FeatureHasher."""
+def engineer_new_interaction_features(df: pd.DataFrame, n_interaction_features: int = 32) -> pd.DataFrame:
+    """Engineers new interaction features using FeatureHasher with multiple interaction sets."""
     logging.info(f"[FEATURE ENG] Engineering new interaction features (target: {n_interaction_features}). Initial shape: {df.shape}")
     if df.empty:
         logging.warning("Skipping new interaction feature engineering as input df is empty.")
@@ -263,19 +263,45 @@ def engineer_new_interaction_features(df: pd.DataFrame, n_interaction_features: 
 
     hasher = FeatureHasher(n_features=n_interaction_features, input_type='string')
     
-    # Ensure required columns exist, handle if not
-    if 'employee_branch' not in df.columns or 'product_main_category' not in df.columns:
-        logging.warning("Required columns for interaction hashing ('employee_branch', 'product_main_category') not found. Skipping interaction features.")
-        return df
-
-    # Create sub-tokens for better hashing
-    interaction_tokens = df.apply(
-        lambda x: [f"branch_{x.get('employee_branch', 'NONE')}", f"cat_{x.get('product_main_category', 'NONE')}"], axis=1
+    # Create multiple interaction sets for better signal capture
+    # First set: shop x main_category
+    interaction1 = df.apply(
+        lambda x: [
+            f"shop_{x.get('employee_shop', 'NONE')}",
+            f"cat_{x.get('product_main_category', 'NONE')}"
+        ],
+        axis=1
     )
-    interaction_hashed_features = hasher.transform(interaction_tokens).toarray()
-
-    for i in range(interaction_hashed_features.shape[1]):
-        df[f'interaction_hash_{i}'] = interaction_hashed_features[:, i]
+    
+    # Second set: brand x target_gender
+    interaction2 = df.apply(
+        lambda x: [
+            f"brand_{x.get('product_brand', 'NONE')}",
+            f"gender_{x.get('product_target_gender', 'NONE')}"
+        ],
+        axis=1
+    )
+    
+    # Third set: sub_category x utility_type
+    interaction3 = df.apply(
+        lambda x: [
+            f"subcat_{x.get('product_sub_category', 'NONE')}",
+            f"utility_{x.get('product_utility_type', 'NONE')}"
+        ],
+        axis=1
+    )
+    
+    # Hash all interaction sets
+    hash1 = hasher.transform(interaction1).toarray()
+    hash2 = hasher.transform(interaction2).toarray()
+    hash3 = hasher.transform(interaction3).toarray()
+    
+    # Combine all hashes
+    all_hashes = np.hstack([hash1, hash2, hash3])
+    
+    # Add as columns
+    for i in range(all_hashes.shape[1]):
+        df[f'interaction_hash_{i}'] = all_hashes[:, i]
     
     logging.info(f"Shape after new interaction features: {df.shape}")
     return df
@@ -324,14 +350,17 @@ def engineer_non_leaky_features(df: pd.DataFrame, is_training: bool = True) -> p
     return df
 
 
-def prepare_features_for_catboost(final_features_df: pd.DataFrame, grouping_cols: list) -> tuple[pd.DataFrame, pd.Series, pd.Series, list, dict]:
-    """Prepares X, y, y_strata, identifies categorical features, and calculates numeric medians for CatBoost."""
-    logging.info("[FEATURES PREP] Preparing final X, y for CatBoost and calculating medians...")
-    if final_features_df.empty or 'selection_rate' not in final_features_df.columns:
-        logging.warning("Skipping final feature preparation as final_features_df is empty or 'selection_rate' is missing.")
-        return pd.DataFrame(), pd.Series(dtype='float64'), pd.Series(dtype='float64'), [], {}
+def prepare_features_for_catboost(final_features_df: pd.DataFrame, grouping_cols: list) -> tuple[pd.DataFrame, pd.Series, pd.Series, pd.Series, list, dict]:
+    """Prepares X, y, exposure, y_strata, identifies categorical features, and calculates numeric medians for CatBoost."""
+    logging.info("[FEATURES PREP] Preparing final X, y, exposure for CatBoost and calculating medians...")
+    if final_features_df.empty or 'selection_count' not in final_features_df.columns:
+        logging.warning("Skipping final feature preparation as final_features_df is empty or 'selection_count' is missing.")
+        return pd.DataFrame(), pd.Series(dtype='float64'), pd.Series(dtype='float64'), pd.Series(dtype='float64'), [], {}
 
-    y = pd.to_numeric(final_features_df['selection_rate'], errors='coerce').fillna(0)
+    # Use selection_count as target for Poisson objective
+    y = pd.to_numeric(final_features_df['selection_count'], errors='coerce').fillna(0)
+    # Use total_employees_in_group as exposure for Poisson
+    exposure = pd.to_numeric(final_features_df['total_employees_in_group'], errors='coerce').fillna(1)
     X = final_features_df.drop(columns=['selection_count', 'selection_rate', 'total_employees_in_group']).copy()
 
     cat_feature_names = list(grouping_cols)
@@ -387,17 +416,19 @@ def prepare_features_for_catboost(final_features_df: pd.DataFrame, grouping_cols
     
     final_cat_feature_indices = [X.columns.get_loc(col) for col in valid_categorical_features if col in X.columns]
 
-    y_strata = pd.cut(y, bins=[-1, 0, 0.1, 0.2, 0.5, 1.0, np.inf], labels=[0, 1, 2, 3, 4, 5], include_lowest=True)
+    # Update stratification for count target (selection_count)
+    y_strata = pd.cut(y, bins=[-1, 0, 1, 2, 5, 10, np.inf], labels=[0, 1, 2, 3, 4, 5], include_lowest=True)
 
     logging.info(f"Final X features shape: {X.shape}")
     logging.info(f"Target y shape: {y.shape}")
+    logging.info(f"Exposure shape: {exposure.shape}")
     logging.info(f"Categorical features for CatBoost ({len(valid_categorical_features)}): {valid_categorical_features}")
     logging.info(f"Categorical feature indices: {final_cat_feature_indices}")
     logging.info(f"Calculated numeric medians: {numeric_medians}")
     if not y_strata.empty:
       logging.info(f"Stratification distribution:\n{y_strata.value_counts().sort_index().to_dict()}")
     
-    return X, y, y_strata, valid_categorical_features, numeric_medians
+    return X, y, exposure, y_strata, valid_categorical_features, numeric_medians
 
 
 # --- Main Pipeline ---
@@ -419,9 +450,9 @@ def main():
     # 3. IMPORTANT: Split data BEFORE feature engineering to avoid leakage
     logging.info("[SPLIT] Creating train/test split BEFORE feature engineering...")
     
-    # Prepare stratification on the aggregated data
-    y_temp = pd.to_numeric(agg_df['selection_rate'], errors='coerce').fillna(0)
-    y_strata_temp = pd.cut(y_temp, bins=[-1, 0, 0.1, 0.2, 0.5, 1, np.inf], labels=[0, 1, 2, 3, 4, 5], include_lowest=True)
+    # Prepare stratification on the aggregated data (use selection_count for Poisson)
+    y_temp = pd.to_numeric(agg_df['selection_count'], errors='coerce').fillna(0)
+    y_strata_temp = pd.cut(y_temp, bins=[-1, 0, 1, 2, 5, 10, np.inf], labels=[0, 1, 2, 3, 4, 5], include_lowest=True)
     
     # Split indices
     train_indices, val_indices = train_test_split(
@@ -450,8 +481,8 @@ def main():
     val_final = engineer_non_leaky_features(val_with_interactions, is_training=False)
 
     # 5. Prepare Features for CatBoost
-    X_train, y_train, _, cat_features_for_model, numeric_medians = prepare_features_for_catboost(train_final, base_grouping_cols)
-    X_val, y_val, _, _, _ = prepare_features_for_catboost(val_final, base_grouping_cols)
+    X_train, y_train, exposure_train, _, cat_features_for_model, numeric_medians = prepare_features_for_catboost(train_final, base_grouping_cols)
+    X_val, y_val, exposure_val, _, _, _ = prepare_features_for_catboost(val_final, base_grouping_cols)
     
     # Ensure validation features match training features using a definitive feature list
     final_feature_list = list(X_train.columns)
@@ -478,8 +509,8 @@ def main():
     
     initial_model_params = {
         'iterations': 1000,
-        'loss_function': 'RMSE',
-        'eval_metric': 'R2',
+        'loss_function': 'Poisson',
+        'eval_metric': 'Poisson',
         'random_seed': 42,
         'learning_rate': 0.05,
         'depth': 6,
@@ -488,7 +519,7 @@ def main():
         'verbose': 100
     }
     trained_initial_model, initial_metrics = train_catboost_model(
-        X_train, y_train, X_val, y_val, cat_features_for_model, initial_model_params, "Initial"
+        X_train, y_train, X_val, y_val, exposure_train, exposure_val, cat_features_for_model, initial_model_params, "Initial"
     )
 
     if not trained_initial_model:
@@ -497,7 +528,7 @@ def main():
 
     # 7. Hyperparameter Tuning with Optuna
     best_params_optuna = tune_hyperparameters_optuna(
-        X_train, y_train, X_val, y_val, cat_features_for_model, n_trials=15
+        X_train, y_train, X_val, y_val, exposure_train, exposure_val, cat_features_for_model, n_trials=300
     )
     
     if not best_params_optuna:
@@ -505,8 +536,8 @@ def main():
         best_params_final = initial_model_params
     else:
         best_params_final = best_params_optuna
-        best_params_final['loss_function'] = 'RMSE'
-        best_params_final['eval_metric'] = 'R2'
+        best_params_final['loss_function'] = 'Poisson'
+        best_params_final['eval_metric'] = 'Poisson'
         best_params_final['random_seed'] = 42
         best_params_final['verbose'] = 100
         if 'early_stopping_rounds' not in best_params_final:
@@ -514,7 +545,7 @@ def main():
 
     # 8. Train Final Model with Best/Chosen Parameters
     trained_final_model, final_metrics_val = train_catboost_model(
-        X_train, y_train, X_val, y_val, cat_features_for_model, best_params_final, "Final Tuned"
+        X_train, y_train, X_val, y_val, exposure_train, exposure_val, cat_features_for_model, best_params_final, "Final Tuned"
     )
 
     if not trained_final_model:
@@ -702,9 +733,9 @@ def compute_and_save_shop_resolver_aggregates(train_df: pd.DataFrame, model_dir:
     product_relativity_snapshot_df.to_csv(relativity_csv_path, index=False)
     logging.info(f"Saved product_relativity_features.csv with {len(product_relativity_snapshot_df)} rows.")
 
-def train_catboost_model(X_train, y_train, X_val, y_val, cat_features, params, model_name="CatBoost"):
-    """Trains a CatBoost model and returns the trained model and validation metrics."""
-    logging.info(f"[{model_name} TRAINING] Training CatBoost Regressor...")
+def train_catboost_model(X_train, y_train, X_val, y_val, exposure_train, exposure_val, cat_features, params, model_name="CatBoost"):
+    """Trains a CatBoost model with Poisson objective and returns the trained model and validation metrics."""
+    logging.info(f"[{model_name} TRAINING] Training CatBoost Regressor with Poisson loss...")
     logging.info(f"Parameters: {params}")
     
     model = CatBoostRegressor(**params, cat_features=cat_features)
@@ -712,56 +743,99 @@ def train_catboost_model(X_train, y_train, X_val, y_val, cat_features, params, m
     model.fit(
         X_train, y_train,
         eval_set=(X_val, y_val),
+        sample_weight=exposure_train,
         early_stopping_rounds=params.get('early_stopping_rounds', 50)
     )
     
     y_pred_val = model.predict(X_val)
-    y_pred_val = np.clip(y_pred_val, 0, 1)
+    # For Poisson, predictions should be non-negative
+    y_pred_val = np.maximum(y_pred_val, 0)
 
-    r2_val = r2_score(y_val, y_pred_val)
-    mae_val = mean_absolute_error(y_val, y_pred_val)
-    rmse_val = np.sqrt(mean_squared_error(y_val, y_pred_val))
+    # Calculate metrics appropriate for count data
+    from sklearn.metrics import mean_poisson_deviance
+    r2_val = r2_score(y_val, y_pred_val, sample_weight=exposure_val)
+    mae_val = mean_absolute_error(y_val, y_pred_val, sample_weight=exposure_val)
+    rmse_val = np.sqrt(mean_squared_error(y_val, y_pred_val, sample_weight=exposure_val))
+    poisson_deviance = mean_poisson_deviance(y_val, y_pred_val, sample_weight=exposure_val)
+    
+    # Business-weighted MAPE
+    weighted_errors = np.abs(y_val - y_pred_val) * exposure_val
+    weighted_actuals = y_val * exposure_val
+    business_mape = np.mean(weighted_errors / (weighted_actuals + 1e-8)) * 100
 
     metrics = {
         "r2_validation": r2_val,
         "mae_validation": mae_val,
-        "rmse_validation": rmse_val
+        "rmse_validation": rmse_val,
+        "poisson_deviance": poisson_deviance,
+        "business_mape": business_mape
     }
     logging.info(f"[{model_name} VALIDATION] R²: {r2_val:.4f}, MAE: {mae_val:.4f}, RMSE: {rmse_val:.4f}")
+    logging.info(f"[{model_name} VALIDATION] Poisson Deviance: {poisson_deviance:.4f}, Business MAPE: {business_mape:.2f}%")
     return model, metrics
 
-def tune_hyperparameters_optuna(X_train, y_train, X_val, y_val, cat_features, n_trials=15):
-    """Tunes CatBoost hyperparameters using Optuna."""
-    logging.info("[OPTUNA] Starting Optuna hyperparameter optimization...")
+def tune_hyperparameters_optuna(X_train, y_train, X_val, y_val, exposure_train, exposure_val, cat_features, n_trials=300):
+    """Tunes CatBoost hyperparameters using Optuna with expanded search space."""
+    logging.info("[OPTUNA] Starting Optuna hyperparameter optimization with expanded search space...")
+    
+    from optuna.pruners import MedianPruner
+    from optuna.integration import CatBoostPruningCallback
 
     def objective(trial):
+        # First determine bootstrap type
+        bootstrap_type = trial.suggest_categorical('bootstrap_type', ['Bayesian', 'Bernoulli'])
+        
         param = {
-            'iterations': trial.suggest_int('iterations', 400, 1500, step=100),
-            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.2, log=True),
-            'depth': trial.suggest_int('depth', 4, 10),
-            'l2_leaf_reg': trial.suggest_float('l2_leaf_reg', 1e-2, 20.0, log=True),
-            'border_count': trial.suggest_int('border_count', 32, 255),
-            'random_strength': trial.suggest_float('random_strength', 1e-8, 10.0, log=True),
-            'bagging_temperature': trial.suggest_float('bagging_temperature', 0.0, 1.0),
-            'loss_function': 'RMSE',
-            'eval_metric': 'R2',
+            'iterations': trial.suggest_int('iterations', 100, 2000),
+            'learning_rate': trial.suggest_float('learning_rate', 0.001, 0.3, log=True),
+            'depth': trial.suggest_int('depth', 3, 8),  # Shallower for categoricals
+            'l2_leaf_reg': trial.suggest_float('l2_leaf_reg', 1, 10),
+            'random_strength': trial.suggest_float('random_strength', 0, 10),
+            'grow_policy': trial.suggest_categorical('grow_policy', ['Depthwise', 'Lossguide']),
+            'bootstrap_type': bootstrap_type,
+            'one_hot_max_size': trial.suggest_int('one_hot_max_size', 2, 50),
+            'min_data_in_leaf': trial.suggest_int('min_data_in_leaf', 1, 100),
+            'loss_function': 'Poisson',
+            'eval_metric': 'Poisson',
             'random_seed': 42,
             'verbose': 0,
             'early_stopping_rounds': 50
         }
+        
+        # Add bootstrap-specific parameters
+        if bootstrap_type == 'Bayesian':
+            param['bagging_temperature'] = trial.suggest_float('bagging_temperature', 0, 1)
+        elif bootstrap_type == 'Bernoulli':
+            param['subsample'] = trial.suggest_float('subsample', 0.6, 1.0)
+        
+        # Pruning callback
+        pruning_callback = CatBoostPruningCallback(trial, 'Poisson')
+        
         model = CatBoostRegressor(**param, cat_features=cat_features)
-        model.fit(X_train, y_train, eval_set=[(X_val, y_val)], early_stopping_rounds=param['early_stopping_rounds'], verbose=0)
-        preds = model.predict(X_val)
-        preds = np.clip(preds, 0, 1)
-        r2 = r2_score(y_val, preds)
-        return r2
+        model.fit(
+            X_train, y_train,
+            eval_set=[(X_val, y_val)],
+            sample_weight=exposure_train,
+            early_stopping_rounds=param['early_stopping_rounds'],
+            callbacks=[pruning_callback],
+            verbose=0
+        )
+        
+        # Use validation Poisson score for optimization
+        return model.best_score_['validation']['Poisson']
 
-    study = optuna.create_study(direction='maximize', study_name='catboost_rmse_r2_script')
-    study.optimize(objective, n_trials=n_trials)
+    # Create study with MedianPruner
+    study = optuna.create_study(
+        direction='minimize',  # Minimize Poisson deviance
+        pruner=MedianPruner(n_startup_trials=10, n_warmup_steps=20),
+        study_name='catboost_poisson_optimization'
+    )
+    
+    study.optimize(objective, n_trials=n_trials, n_jobs=10, show_progress_bar=True)
 
     logging.info(f"Optuna: Number of finished trials: {len(study.trials)}")
     best_trial = study.best_trial
-    logging.info(f"Optuna: Best trial R2: {best_trial.value:.4f}")
+    logging.info(f"Optuna: Best trial Poisson score: {best_trial.value:.4f}")
     logging.info(f"Optuna: Best params: {best_trial.params}")
     return best_trial.params
 
@@ -841,7 +915,7 @@ def save_model_artifacts(model, params, metrics, feature_list, cat_feature_list,
     logging.info(f"Model metrics saved to: {metrics_path}")
     
     metadata = {
-        'model_type': 'CatBoost Regressor (RMSE)',
+        'model_type': 'CatBoost Regressor (Poisson)',
         'catboost_version': catboost.__version__,
         'training_timestamp': datetime.now().isoformat(),
         'features_used': feature_list,

@@ -98,7 +98,7 @@ def run_smoke_test():
             logging.error("Please ensure the model has been trained by running `src/ml/catboost_trainer.py`.")
             return False
             
-        predictor = get_predictor(model_path=model_path, historical_data_path=historical_data_path)
+        predictor = get_predictor(model_path=model_path)
         logging.info("Predictor initialized successfully.")
 
         # 2. Create Test Payload
@@ -113,10 +113,10 @@ def run_smoke_test():
         # 4. Validate Results
         logging.info("--- Validation ---")
         
-        # Assertion 1: Check if results are a list of PredictionResult objects
-        assert isinstance(results, list) and all(isinstance(r, PredictionResult) for r in results), \
-            f"Expected a list of PredictionResult objects, but got {type(results)}."
-        logging.info(f"✅ OK: Prediction returned a list of {len(results)} PredictionResult objects.")
+        # Assertion 1: Check if results are a list of dictionaries
+        assert isinstance(results, list) and all(isinstance(r, dict) for r in results), \
+            f"Expected a list of dictionaries, but got {type(results)}."
+        logging.info(f"✅ OK: Prediction returned a list of {len(results)} prediction dictionaries.")
 
         # Assertion 2: Check if the number of predictions matches the number of presents
         assert len(results) == len(presents), \
@@ -124,7 +124,7 @@ def run_smoke_test():
         logging.info("✅ OK: Number of predictions matches number of presents.")
 
         # Assertion 3: Check for non-negative quantities
-        quantities = [r.expected_qty for r in results]
+        quantities = [r['expected_qty'] for r in results]
         assert all(qty >= 0 for qty in quantities), \
             f"Found negative quantities in predictions: {quantities}"
         logging.info("✅ OK: All predicted quantities are non-negative.")
@@ -149,7 +149,7 @@ def run_smoke_test():
         logging.info("✅ OK: Total predicted quantity is not artificially normalized to total employees.")
 
         logging.info("\n--- Prediction Results ---")
-        results_df = pd.DataFrame([r.model_dump() for r in results])
+        results_df = pd.DataFrame(results)
         print(results_df.to_string(index=False))
         logging.info("--------------------------\n")
 
