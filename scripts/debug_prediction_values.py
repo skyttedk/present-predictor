@@ -18,7 +18,7 @@ def debug_predictions():
     
     print("Initializing predictor...")
     predictor = GiftDemandPredictor(
-        model_path="models/catboost_rmse_model/catboost_rmse_model.cbm",
+        model_path="models/catboost_poisson_model/catboost_poisson_model.cbm",
         historical_data_path="src/data/historical/present.selection.historic.csv"
     )
     

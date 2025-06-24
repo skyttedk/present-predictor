@@ -21,7 +21,7 @@ from catboost import CatBoostRegressor, Pool
 
 def load_model_metadata():
     """Load and examine model metadata"""
-    metadata_path = "models/catboost_rmse_model/model_metadata.pkl"
+    metadata_path = "models/catboost_poisson_model/model_metadata.pkl"
     
     if not os.path.exists(metadata_path):
         print("❌ Model metadata not found!")
@@ -44,12 +44,12 @@ def test_model_on_training_like_data():
     print("\n🔬 Testing model on varied synthetic data...")
     
     # Load the model directly
-    model_path = "models/catboost_rmse_model/catboost_rmse_model.cbm"
+    model_path = "models/catboost_poisson_model/catboost_poisson_model.cbm"
     model = CatBoostRegressor()
     model.load_model(model_path)
     
     # Load metadata to get feature structure
-    metadata_path = "models/catboost_rmse_model/model_metadata.pkl"
+    metadata_path = "models/catboost_poisson_model/model_metadata.pkl"
     with open(metadata_path, 'rb') as f:
         metadata = pickle.load(f)
     
@@ -196,7 +196,7 @@ def compare_feature_importance():
     """Load and analyze feature importance from training"""
     print("\n🎯 Feature Importance Analysis:")
     
-    metadata_path = "models/catboost_rmse_model/model_metadata.pkl"
+    metadata_path = "models/catboost_poisson_model/model_metadata.pkl"
     with open(metadata_path, 'rb') as f:
         metadata = pickle.load(f)
     

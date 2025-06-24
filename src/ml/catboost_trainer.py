@@ -364,7 +364,12 @@ def prepare_features_for_catboost(final_features_df: pd.DataFrame, grouping_cols
     y = pd.to_numeric(final_features_df['selection_count'], errors='coerce').fillna(0)
     # Use total_employees_in_group as exposure for Poisson
     exposure = pd.to_numeric(final_features_df['total_employees_in_group'], errors='coerce').fillna(1)
+    
+    # Store log_exposure for baseline (offset) - don't add as feature
+    log_exposure = np.log(exposure + 1e-8)
+    
     X = final_features_df.drop(columns=['selection_count', 'selection_rate', 'total_employees_in_group']).copy()
+    # DO NOT add log_exposure as feature - it will be used as baseline offset
 
     cat_feature_names = list(grouping_cols)
     cat_feature_names.extend([
@@ -393,6 +398,7 @@ def prepare_features_for_catboost(final_features_df: pd.DataFrame, grouping_cols
         'is_shop_most_frequent_main_category', 'is_shop_most_frequent_brand',
         'product_share_in_shop', 'brand_share_in_shop',
         'product_rank_in_shop', 'brand_rank_in_shop'
+        # log_exposure removed - now used as baseline offset, not feature
     ] + [f'interaction_hash_{i}' for i in range(num_hash_features)]
     
     # Calculate medians for numeric columns BEFORE filling NaNs
@@ -446,7 +452,7 @@ def prepare_features_for_catboost(final_features_df: pd.DataFrame, grouping_cols
     if not y_strata.empty:
       logging.info(f"Stratification distribution:\n{y_strata.value_counts().sort_index().to_dict()}")
     
-    return X, y, exposure, y_strata, valid_categorical_features, numeric_medians
+    return X, y, exposure, log_exposure, y_strata, valid_categorical_features, numeric_medians
 
 
 # --- Main Pipeline ---
@@ -503,8 +509,8 @@ def main():
     val_final = engineer_non_leaky_features(val_with_interactions, is_training=False)
 
     # 5. Prepare Features for CatBoost
-    X_train, y_train, exposure_train, _, cat_features_for_model, numeric_medians = prepare_features_for_catboost(train_final, base_grouping_cols)
-    X_val, y_val, exposure_val, _, _, _ = prepare_features_for_catboost(val_final, base_grouping_cols)
+    X_train, y_train, exposure_train, log_exposure_train, _, cat_features_for_model, numeric_medians = prepare_features_for_catboost(train_final, base_grouping_cols)
+    X_val, y_val, exposure_val, log_exposure_val, _, _, _ = prepare_features_for_catboost(val_final, base_grouping_cols)
     
     # Ensure validation features match training features using a definitive feature list
     final_feature_list = list(X_train.columns)
@@ -541,7 +547,7 @@ def main():
         'verbose': 100
     }
     trained_initial_model, initial_metrics = train_catboost_model(
-        X_train, y_train, X_val, y_val, exposure_train, exposure_val, cat_features_for_model, initial_model_params, "Initial"
+        X_train, y_train, X_val, y_val, log_exposure_train, log_exposure_val, cat_features_for_model, initial_model_params, "Initial"
     )
 
     if not trained_initial_model:
@@ -550,7 +556,7 @@ def main():
 
     # 7. Hyperparameter Tuning with Optuna
     best_params_optuna = tune_hyperparameters_optuna(
-        X_train, y_train, X_val, y_val, exposure_train, exposure_val, cat_features_for_model, n_trials=300
+        X_train, y_train, X_val, y_val, log_exposure_train, log_exposure_val, cat_features_for_model, n_trials=300
     )
     
     if not best_params_optuna:
@@ -567,7 +573,7 @@ def main():
 
     # 8. Train Final Model with Best/Chosen Parameters
     trained_final_model, final_metrics_val = train_catboost_model(
-        X_train, y_train, X_val, y_val, exposure_train, exposure_val, cat_features_for_model, best_params_final, "Final Tuned"
+        X_train, y_train, X_val, y_val, log_exposure_train, log_exposure_val, cat_features_for_model, best_params_final, "Final Tuned"
     )
 
     if not trained_final_model:
@@ -755,16 +761,16 @@ def compute_and_save_shop_resolver_aggregates(train_df: pd.DataFrame, model_dir:
     product_relativity_snapshot_df.to_csv(relativity_csv_path, index=False)
     logging.info(f"Saved product_relativity_features.csv with {len(product_relativity_snapshot_df)} rows.")
 
-def train_catboost_model(X_train, y_train, X_val, y_val, exposure_train, exposure_val, cat_features, params, model_name="CatBoost"):
-    """Trains a CatBoost model with Poisson objective and returns the trained model and validation metrics."""
-    logging.info(f"[{model_name} TRAINING] Training CatBoost Regressor with Poisson loss...")
+def train_catboost_model(X_train, y_train, X_val, y_val, log_exposure_train, log_exposure_val, cat_features, params, model_name="CatBoost"):
+    """Trains a CatBoost model with Poisson objective using log_exposure as baseline offset."""
+    logging.info(f"[{model_name} TRAINING] Training CatBoost Regressor with Poisson loss and baseline offset...")
     logging.info(f"Parameters: {params}")
     
     model = CatBoostRegressor(**params, cat_features=cat_features)
     
-    # C5 Fix: Create pools with validation weights for proper early stopping
-    train_pool = Pool(X_train, label=y_train, cat_features=cat_features, weight=exposure_train)
-    val_pool = Pool(X_val, label=y_val, cat_features=cat_features, weight=exposure_val)
+    # Use log_exposure as baseline (offset) instead of weights
+    train_pool = Pool(X_train, label=y_train, cat_features=cat_features, baseline=log_exposure_train)
+    val_pool = Pool(X_val, label=y_val, cat_features=cat_features, baseline=log_exposure_val)
     
     model.fit(
         train_pool,
@@ -776,17 +782,15 @@ def train_catboost_model(X_train, y_train, X_val, y_val, exposure_train, exposur
     # For Poisson, predictions should be non-negative
     y_pred_val = np.maximum(y_pred_val, 0)
 
-    # Calculate metrics appropriate for count data
+    # Calculate metrics appropriate for count data (no sample weights needed with proper offset)
     from sklearn.metrics import mean_poisson_deviance
-    r2_val = r2_score(y_val, y_pred_val, sample_weight=exposure_val)
-    mae_val = mean_absolute_error(y_val, y_pred_val, sample_weight=exposure_val)
-    rmse_val = np.sqrt(mean_squared_error(y_val, y_pred_val, sample_weight=exposure_val))
-    poisson_deviance = mean_poisson_deviance(y_val, y_pred_val, sample_weight=exposure_val)
+    r2_val = r2_score(y_val, y_pred_val)
+    mae_val = mean_absolute_error(y_val, y_pred_val)
+    rmse_val = np.sqrt(mean_squared_error(y_val, y_pred_val))
+    poisson_deviance = mean_poisson_deviance(y_val, y_pred_val)
     
-    # Business-weighted MAPE
-    weighted_errors = np.abs(y_val - y_pred_val) * exposure_val
-    weighted_actuals = y_val * exposure_val
-    business_mape = np.mean(weighted_errors / (weighted_actuals + 1e-8)) * 100
+    # Business MAPE (unweighted since offset handles exposure)
+    business_mape = np.mean(np.abs(y_val - y_pred_val) / (y_val + 1e-8)) * 100
 
     metrics = {
         "r2_validation": r2_val,
@@ -799,9 +803,9 @@ def train_catboost_model(X_train, y_train, X_val, y_val, exposure_train, exposur
     logging.info(f"[{model_name} VALIDATION] Poisson Deviance: {poisson_deviance:.4f}, Business MAPE: {business_mape:.2f}%")
     return model, metrics
 
-def tune_hyperparameters_optuna(X_train, y_train, X_val, y_val, exposure_train, exposure_val, cat_features, n_trials=300):
-    """Tunes CatBoost hyperparameters using Optuna with expanded search space."""
-    logging.info("[OPTUNA] Starting Optuna hyperparameter optimization with expanded search space...")
+def tune_hyperparameters_optuna(X_train, y_train, X_val, y_val, log_exposure_train, log_exposure_val, cat_features, n_trials=300):
+    """Tunes CatBoost hyperparameters using Optuna with baseline offset."""
+    logging.info("[OPTUNA] Starting Optuna hyperparameter optimization with baseline offset...")
     
     from optuna.pruners import MedianPruner
     from optuna.integration import CatBoostPruningCallback
@@ -837,9 +841,9 @@ def tune_hyperparameters_optuna(X_train, y_train, X_val, y_val, exposure_train, 
         pruning_callback = CatBoostPruningCallback(trial, 'Poisson')
         
         model = CatBoostRegressor(**param, cat_features=cat_features)
-        # C5 Fix: Use Pool objects with validation weights for Optuna optimization
-        train_pool = Pool(X_train, label=y_train, cat_features=cat_features, weight=exposure_train)
-        val_pool = Pool(X_val, label=y_val, cat_features=cat_features, weight=exposure_val)
+        # Use Pool objects with baseline offset for Optuna optimization
+        train_pool = Pool(X_train, label=y_train, cat_features=cat_features, baseline=log_exposure_train)
+        val_pool = Pool(X_val, label=y_val, cat_features=cat_features, baseline=log_exposure_val)
         
         model.fit(
             train_pool,
@@ -849,14 +853,14 @@ def tune_hyperparameters_optuna(X_train, y_train, X_val, y_val, exposure_train, 
             verbose=0
         )
         
-        # For completeness, use Poisson score for optimization as recommended
+        # Use Poisson score for optimization as recommended
         try:
             return model.best_score_["validation"]["Poisson"]
         except (KeyError, AttributeError):
-            # Fallback to weighted MSE if Poisson score unavailable
-            y_pred_val = model.predict(X_val)
-            weighted_mse = np.average((y_pred_val - y_val) ** 2, weights=exposure_val)
-            return weighted_mse
+            # Fallback to MSE if Poisson score unavailable (no weights needed with offset)
+            y_pred_val = model.predict(val_pool)
+            mse = np.mean((y_pred_val - y_val) ** 2)
+            return mse
 
     # Create study with MedianPruner
     study = optuna.create_study(

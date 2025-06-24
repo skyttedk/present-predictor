@@ -14,7 +14,7 @@ from src.ml.shop_features import ShopFeatureResolver
 
 def show_historical_features_snapshot():
     """Show example row from historical_features_snapshot.pkl"""
-    model_dir = "models/catboost_rmse_model"
+    model_dir = "models/catboost_poisson_model"
     hist_path = os.path.join(model_dir, 'historical_features_snapshot.pkl')
     
     if os.path.exists(hist_path):
@@ -42,7 +42,7 @@ def test_shop_resolver():
     """Test ShopFeatureResolver with the same shop"""
     print("\n=== CORRESPONDING ShopFeatureResolver OUTPUT ===")
     
-    model_dir = "models/catboost_rmse_model"
+    model_dir = "models/catboost_poisson_model"
     resolver = ShopFeatureResolver(model_dir)
     
     # Get first shop from snapshot to test

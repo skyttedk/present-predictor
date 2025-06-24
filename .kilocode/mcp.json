@@ -16,7 +16,8 @@
       "alwaysAllow": [
         "read_graph",
         "create_entities",
-        "create_relations"
+        "create_relations",
+        "add_observations"
       ]
     }
   }

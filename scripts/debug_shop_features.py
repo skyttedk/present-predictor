@@ -90,7 +90,7 @@ def debug_shop_feature_resolution():
     
     # Check the product relativity lookup
     print("📊 Checking Product Relativity Lookup Table")
-    lookup_path = "models/catboost_rmse_model/product_relativity_features.csv"
+    lookup_path = "models/catboost_poisson_model/product_relativity_features.csv"
     
     if os.path.exists(lookup_path):
         lookup_df = pd.read_csv(lookup_path)
@@ -128,7 +128,7 @@ def compare_training_vs_inference_features():
     print("=" * 60)
     
     # Load a sample from the product relativity lookup (represents training data)
-    lookup_path = "models/catboost_rmse_model/product_relativity_features.csv"
+    lookup_path = "models/catboost_poisson_model/product_relativity_features.csv"
     
     if not os.path.exists(lookup_path):
         print("❌ Cannot compare - lookup table missing")

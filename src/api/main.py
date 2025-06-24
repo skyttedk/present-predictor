@@ -769,3 +769,46 @@ async def get_tail_logs(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error retrieving logs: {str(e)}"
         )
+
+
+@app.post("/admin/force-reload-predictor", status_code=status.HTTP_200_OK)
+async def force_reload_predictor(
+    admin_user: Dict = Depends(get_admin_user)
+):
+    """
+    Force reload of the cached predictor instance.
+    
+    This endpoint clears the global predictor cache and forces
+    a fresh model load on the next prediction request.
+    
+    Requires admin authentication.
+    """
+    start_time = time.time()
+    
+    try:
+        # Import the predictor module to access the global cache
+        from ..ml.predictor import clear_predictor_cache
+        
+        # Clear the cached predictor instance
+        success = clear_predictor_cache()
+        
+        processing_time_ms = (time.time() - start_time) * 1000
+        
+        if success:
+            return {
+                "message": "Predictor cache cleared successfully. Next prediction will load fresh model.",
+                "processing_time_ms": processing_time_ms,
+                "timestamp": time.time()
+            }
+        else:
+            return {
+                "message": "No cached predictor found to clear.",
+                "processing_time_ms": processing_time_ms,
+                "timestamp": time.time()
+            }
+            
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error clearing predictor cache: {str(e)}"
+        )

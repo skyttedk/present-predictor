@@ -18,7 +18,7 @@ import logging
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Configuration
-MODEL_PATH = "models/catboost_rmse_model/catboost_rmse_model.cbm"
+MODEL_PATH = "models/catboost_poisson_model/catboost_poisson_model.cbm"
 HISTORICAL_DATA_PATH = "src/data/historical/present.selection.historic.csv"
 
 # Setup logging

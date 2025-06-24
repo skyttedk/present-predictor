@@ -142,7 +142,7 @@ class ModelSettings(BaseSettings):
     training_train_test_split_ratio: float = Field(default=0.8, env="MODEL_TRAINING_TRAIN_TEST_SPLIT_RATIO")
     training_validation_split_ratio: float = Field(default=0.2, env="MODEL_TRAINING_VALIDATION_SPLIT_RATIO")
     training_cv_folds: int = Field(default=5, env="MODEL_TRAINING_CV_FOLDS")
-    training_model_save_path: str = Field(default="models/catboost_rmse_model", env="MODEL_TRAINING_MODEL_SAVE_PATH")
+    training_model_save_path: str = Field(default="models/catboost_poisson_model", env="MODEL_TRAINING_MODEL_SAVE_PATH")
 
     # Prediction Settings
     prediction_min_prediction_value: float = Field(default=0.0, env="MODEL_PREDICTION_MIN_PREDICTION_VALUE")

@@ -251,7 +251,7 @@ class GiftDemandPredictor:
         for gender, count in employee_gender_counts.items():
             if count > 0:
                 features = self._create_feature_vector(
-                    present, gender, branch, shop_features
+                    present, gender, branch, shop_features, count
                 )
                 rows.append(features)
                 gender_counts_list.append(count)
@@ -298,7 +298,7 @@ class GiftDemandPredictor:
             }
     
     def _create_feature_vector(self, present: Dict, employee_gender: str,
-                             branch: str, shop_features: Dict) -> Dict:
+                             branch: str, shop_features: Dict, count: int) -> Dict:
         """Create feature vector for one present-employee combination"""
         
         # Base features matching training data structure
@@ -315,7 +315,8 @@ class GiftDemandPredictor:
             'product_durability': present.get('durability', 'NONE'),
             'product_target_gender': present.get('target_demographic', 'NONE'),
             'product_utility_type': present.get('utility_type', 'NONE'),
-            'product_type': present.get('usage_type', 'NONE')
+            'product_type': present.get('usage_type', 'NONE'),
+            'log_exposure': np.log(count + 1e-8)  # CRITICAL: Add log_exposure feature
         }
         
         # Add shop-level features (binary indicators are already included in shop_features)
@@ -379,6 +380,11 @@ class GiftDemandPredictor:
         
         initial_columns = set(df.columns) # Store initial columns for logging later
         
+        # Preserve log_exposure for baseline offset (will be used in _make_catboost_prediction)
+        log_exposure_preserved = None
+        if 'log_exposure' in df.columns:
+            log_exposure_preserved = df['log_exposure'].copy()
+        
         # Convert categorical columns to string
         for col in self.categorical_features:
             if col in df.columns:
@@ -394,6 +400,7 @@ class GiftDemandPredictor:
             'is_shop_most_frequent_main_category', 'is_shop_most_frequent_brand',
             'product_share_in_shop', 'brand_share_in_shop',
             'product_rank_in_shop', 'brand_rank_in_shop'
+            # log_exposure removed - now used as baseline offset, not feature
         ] + [f'interaction_hash_{i}' for i in range(num_hash_features)]
         
         for col in numeric_cols:
@@ -436,6 +443,10 @@ class GiftDemandPredictor:
                       df[col] = "NONE"
                  df[col] = df[col].astype(str)
 
+        # Restore log_exposure for baseline offset usage
+        if log_exposure_preserved is not None:
+            df['log_exposure'] = log_exposure_preserved
+
         # Log columns that were added because they were in expected_columns but not in initial_columns
         added_columns = set(self.expected_columns) - initial_columns
         if added_columns:
@@ -444,18 +455,25 @@ class GiftDemandPredictor:
         return df
     
     def _make_catboost_prediction(self, feature_df: pd.DataFrame) -> np.ndarray:
-        """Make prediction using CatBoost with proper categorical handling"""
+        """Make prediction using CatBoost with proper baseline offset for Poisson model"""
+        
+        # Extract log_exposure for baseline offset (keep a copy of offset)
+        log_offset = feature_df['log_exposure'].values  # <-- 1
+        
+        # Drop log_exposure from feature set fed to the model
+        feature_df_nolog = feature_df.drop(columns=['log_exposure'])  # <-- 2
         
         # Get categorical feature indices
         cat_feature_indices = [
-            feature_df.columns.get_loc(col) for col in self.categorical_features 
-            if col in feature_df.columns
+            feature_df_nolog.columns.get_loc(col) for col in self.categorical_features
+            if col in feature_df_nolog.columns
         ]
         
-        # Create CatBoost Pool
+        # Create CatBoost Pool with baseline offset
         test_pool = Pool(
-            data=feature_df,
-            cat_features=cat_feature_indices
+            data=feature_df_nolog,
+            cat_features=cat_feature_indices,
+            baseline=log_offset  # <-- 3
         )
         
         # Make predictions - Poisson model outputs counts directly, not rates
@@ -525,3 +543,21 @@ def get_predictor(model_path: str = "models/catboost_poisson_model/catboost_pois
         logger.debug("Returning cached predictor instance.")
         
     return _predictor_instance
+
+
+def clear_predictor_cache() -> bool:
+    """
+    Clear the cached predictor instance to force reload on next access.
+    
+    Returns:
+        bool: True if a cached instance was cleared, False if no instance was cached
+    """
+    global _predictor_instance
+    
+    if _predictor_instance is not None:
+        logger.info("Clearing cached predictor instance to force fresh model reload")
+        _predictor_instance = None
+        return True
+    else:
+        logger.info("No cached predictor instance found to clear")
+        return False

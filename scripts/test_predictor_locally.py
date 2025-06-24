@@ -15,7 +15,7 @@ from src.api.schemas.requests import PredictionRequest, GiftItem, Employee as AP
 from src.config.settings import get_settings # To ensure settings (like OpenAI key) are loaded
 
 # --- Configuration ---
-MODEL_PATH = "models/catboost_rmse_model/catboost_rmse_model.cbm"
+MODEL_PATH = "models/catboost_poisson_model/catboost_poisson_model.cbm"
 HISTORICAL_DATA_PATH = "src/data/historical/present.selection.historic.csv"
 
 # --- Logging Setup ---
