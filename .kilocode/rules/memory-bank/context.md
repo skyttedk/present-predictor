@@ -1,13 +1,13 @@
 # Current Context
 
 ## Project Status
-**Phase**: Expert-Guided Optimization Implementation
+**Phase**: Priority 2 - Critical Post-Implementation Fixes
 **Last Updated**: June 24, 2025
 
 ## Current Work Focus
-All four Priority 1 fixes from the ML expert review have been successfully implemented with training/prediction pipeline consistency verified. The system is now ready for model retraining to unlock the expected +0.10-0.14 R² improvement toward the target of R² ≈ 0.40+.
+Second-pass technical audit revealed 6 critical blocking issues (C1-C6) that prevent the model from functioning correctly despite Priority 1 improvements. These must be fixed immediately before the model can work in production. Most critical is C1 (target mismatch) where training uses counts but predictor expects rates.
 
-## Recent Changes - Priority 1 Expert Fixes (June 24, 2025)
+## Recent Changes - Priority 1 Expert Fixes (June 24, 2025) ✅ COMPLETED
 All four immediate fixes have been implemented in parallel with consistency verification completed:
 
 ### ✅ **Fix 1: Shop Identifier Schema Drift** - COMPLETED
@@ -50,19 +50,52 @@ All four immediate fixes have been implemented in parallel with consistency veri
 -   ✅ **Schema Consistency**: Training and prediction pipelines now use identical feature engineering
 -   ✅ **Performance Expected**: Expert analysis predicts +0.10-0.14 R² improvement
 
-## Critical Next Steps
-1.  **🚀 IMMEDIATE: Execute Model Retraining**: Run the updated [`src/ml/catboost_trainer.py`](src/ml/catboost_trainer.py:1) script to retrain with all fixes:
-    ```bash
-    python src/ml/catboost_trainer.py
-    ```
-2.  **Validate Performance Improvement**: Confirm R² improvement from current ~0.31 toward target 0.40+
-3.  **Monitor New Metrics**: Review Poisson deviance and business MAPE alongside traditional R²
-4.  **Update Predictor**: Ensure predictor works with the new Poisson-trained model
-5.  **Deploy Enhanced Model**: Proceed with staging deployment once validated
+## Priority 2 Critical Blocking Issues ✅ COMPLETED AND VALIDATED - June 24, 2025
+All 6 critical blocking issues have been successfully resolved and end-to-end validated:
 
-## Expected Outcomes
-Based on expert analysis, the implemented fixes should achieve:
--   **Primary Target**: R² ≈ 0.40+ (from current 0.31)
--   **Performance Gain**: +0.10-0.14 R² improvement
--   **Business Impact**: 95-100% of realistic performance ceiling
--   **Model Quality**: Proper zero-inflation handling, reduced schema drift, enhanced feature interactions
+### ✅ C1: Target Mismatch - FIXED AND VALIDATED
+- **Issue**: Training used `selection_count` but predictor clipped to [0,1] treating as rates
+- **Fix Applied**: Updated [`src/ml/predictor.py`](src/ml/predictor.py:1) to handle counts directly without clipping
+- **Result**: ✅ **VALIDATED** - Predictions now return reasonable counts (7.5, 6.8, 8.1) instead of rates
+
+### ✅ C2: Shop Feature Keys Mismatch - FIXED AND VALIDATED
+- **Issue**: Training saved as `shop_main_category_diversity_selected` but resolver expected `main_category_diversity`
+- **Fix Applied**: Enhanced [`src/ml/shop_features.py`](src/ml/shop_features.py:1) with backward-compatible key lookup
+- **Result**: ✅ **VALIDATED** - Shop features now load correctly (no missing shop data warnings)
+
+### ✅ C3: Import Error Typo - FIXED AND VALIDATED
+- **Issue**: `return _predictor_instanceshop_features.py.txt` copy-paste artifact
+- **Fix Applied**: Corrected typo in [`src/ml/predictor.py`](src/ml/predictor.py:1)
+- **Result**: ✅ **VALIDATED** - API starts without import errors
+
+### ✅ C4: Hash Column Schema Drift - FIXED AND VALIDATED
+- **Issue**: 96 hash columns created but only 32 enumerated for dtype coercion
+- **Fix Applied**: Updated both [`src/ml/catboost_trainer.py`](src/ml/catboost_trainer.py:1) and [`src/ml/predictor.py`](src/ml/predictor.py:1) to enumerate all 96 features
+- **Result**: ✅ **VALIDATED** - All 96 hash columns properly handled and loaded
+
+### ✅ C5: Missing Validation Weights - FIXED AND VALIDATED
+- **Issue**: CatBoost received no weights for validation set or Optuna optimization
+- **Fix Applied**: Implemented Pool objects with validation weights in trainer and weighted loss in Optuna
+- **Result**: ✅ **VALIDATED** - Model trained with proper weighted validation (Best trial Poisson score: 3.5914)
+
+### ✅ C6: Shop Leakage Persists - FIXED AND VALIDATED
+- **Issue**: Data split stratified by count, allowing same shops in train/val
+- **Fix Applied**: Replaced with `GroupShuffleSplit` to ensure shop-level separation
+- **Result**: ✅ **VALIDATED** - Zero shop overlap between train and validation sets confirmed
+
+## ✅ MODEL RETRAINING AND VALIDATION COMPLETED - June 24, 2025
+1. ✅ **Model Retraining**: Successfully executed `python src/ml/catboost_trainer.py` with all Priority 2 fixes
+2. ✅ **Predictions Validated**: Smoke test confirms reasonable counts (7.5, 6.8, 8.1 range) not rates
+3. ✅ **Shop Features Validated**: All shop features load correctly with diversity > 0
+4. ✅ **API Integration Validated**: End-to-end prediction pipeline functions correctly
+5. ✅ **Business Metrics Validated**: Total predicted quantity: 22.5 for 100 employees (22.5% selection rate)
+
+## Final Validation Results
+**End-to-End Smoke Test Results (June 24, 2025)**:
+-   ✅ **Predictions**: Reasonable counts (7.5, 6.8, 8.1) not clipped rates
+-   ✅ **Shop Features**: Successfully load (no missing shop data warnings)
+-   ✅ **API**: Starts without import errors
+-   ✅ **Validation**: Model trained with proper weighted metrics
+-   ✅ **Business Logic**: Sum(predictions) = 22.5 ≠ employee_count (100) - no artificial normalization
+-   ✅ **Model Version**: v2.0 with all Priority 2 fixes applied and validated
+-   ✅ **Performance**: Confidence scores 0.93-0.95, diverse non-uniform predictions

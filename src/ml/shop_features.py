@@ -95,15 +95,28 @@ class ShopFeatureResolver:
         features = {}
         
         # Only keep diversity and most frequent features
+        # C2 Fix: Handle both key formats (trainer saves with 'shop_' prefix)
         if shop_id in self.shop_data:
             shop_info = self.shop_data[shop_id]
             features.update({
-                'shop_main_category_diversity_selected': shop_info.get('main_category_diversity', 0),
-                'shop_sub_category_diversity_selected': shop_info.get('sub_category_diversity', 0),
-                'shop_brand_diversity_selected': shop_info.get('brand_diversity', 0),
-                'shop_utility_type_diversity_selected': shop_info.get('utility_type_diversity', 0),
-                'shop_most_frequent_main_category_selected': shop_info.get('most_frequent_main_category', 'NONE'),
-                'shop_most_frequent_brand_selected': shop_info.get('most_frequent_brand', 'NONE'),
+                'shop_main_category_diversity_selected':
+                    shop_info.get('shop_main_category_diversity_selected') or
+                    shop_info.get('main_category_diversity', 0),
+                'shop_sub_category_diversity_selected':
+                    shop_info.get('shop_sub_category_diversity_selected') or
+                    shop_info.get('sub_category_diversity', 0),
+                'shop_brand_diversity_selected':
+                    shop_info.get('shop_brand_diversity_selected') or
+                    shop_info.get('brand_diversity', 0),
+                'shop_utility_type_diversity_selected':
+                    shop_info.get('shop_utility_type_diversity_selected') or
+                    shop_info.get('utility_type_diversity', 0),
+                'shop_most_frequent_main_category_selected':
+                    shop_info.get('shop_most_frequent_main_category_selected') or
+                    shop_info.get('most_frequent_main_category', 'NONE'),
+                'shop_most_frequent_brand_selected':
+                    shop_info.get('shop_most_frequent_brand_selected') or
+                    shop_info.get('most_frequent_brand', 'NONE'),
             })
             
             # Binary features

@@ -90,7 +90,7 @@ def run_smoke_test():
         # 1. Get Predictor Instance
         logging.info("Loading model and initializing predictor...")
         # Use absolute paths to ensure the script runs from any directory
-        model_path = os.path.join(BASE_DIR, "models", "catboost_poisson_model", "catboost_poisson_model.cbm")
+        model_path = os.path.join(BASE_DIR, "models", "catboost_rmse_model", "catboost_rmse_model.cbm")
         historical_data_path = os.path.join(BASE_DIR, "src", "data", "historical", "present.selection.historic.csv")
         
         if not os.path.exists(model_path):

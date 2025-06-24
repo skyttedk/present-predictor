@@ -21,7 +21,7 @@ import joblib
 import logging
 from datetime import datetime
 
-from sklearn.model_selection import train_test_split, StratifiedKFold
+from sklearn.model_selection import train_test_split, StratifiedKFold, GroupShuffleSplit
 from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 from sklearn.preprocessing import LabelEncoder # For y_strata
 from sklearn.feature_extraction import FeatureHasher
@@ -377,6 +377,21 @@ def prepare_features_for_catboost(final_features_df: pd.DataFrame, grouping_cols
         else:
             logging.warning(f"Categorical feature '{col}' intended for CatBoost not found in X.")
     
+    # C4 Fix: Enumerate all 96 hash features (32 * 3 interaction sets)
+    INTERACTION_HASH_DIM = 32
+    NUM_INTERACTION_SETS = 3
+    num_hash_features = INTERACTION_HASH_DIM * NUM_INTERACTION_SETS  # 96
+    
+    # Define expected numeric columns including all hash features
+    expected_numeric_cols = [
+        'shop_main_category_diversity_selected', 'shop_brand_diversity_selected',
+        'shop_utility_type_diversity_selected', 'shop_sub_category_diversity_selected',
+        'unique_product_combinations_in_shop',
+        'is_shop_most_frequent_main_category', 'is_shop_most_frequent_brand',
+        'product_share_in_shop', 'brand_share_in_shop',
+        'product_rank_in_shop', 'brand_rank_in_shop'
+    ] + [f'interaction_hash_{i}' for i in range(num_hash_features)]
+    
     # Calculate medians for numeric columns BEFORE filling NaNs
     numeric_medians = {}
     for col in X.columns:
@@ -448,22 +463,26 @@ def main():
         return
 
     # 3. IMPORTANT: Split data BEFORE feature engineering to avoid leakage
-    logging.info("[SPLIT] Creating train/test split BEFORE feature engineering...")
+    # C6 Fix: Use GroupShuffleSplit to prevent shop leakage
+    logging.info("[SPLIT] Creating group-based train/test split to prevent shop leakage...")
     
-    # Prepare stratification on the aggregated data (use selection_count for Poisson)
-    y_temp = pd.to_numeric(agg_df['selection_count'], errors='coerce').fillna(0)
-    y_strata_temp = pd.cut(y_temp, bins=[-1, 0, 1, 2, 5, 10, np.inf], labels=[0, 1, 2, 3, 4, 5], include_lowest=True)
-    
-    # Split indices
-    train_indices, val_indices = train_test_split(
-        np.arange(len(agg_df)),
-        test_size=0.2,
-        random_state=42,
-        stratify=y_strata_temp
-    )
+    # Use GroupShuffleSplit to ensure shops don't appear in both train and validation
+    gss = GroupShuffleSplit(test_size=0.2, random_state=42, n_splits=1)
+    train_indices, val_indices = next(gss.split(agg_df, groups=agg_df['employee_shop']))
     
     train_df = agg_df.iloc[train_indices].copy()
     val_df = agg_df.iloc[val_indices].copy()
+    
+    # Verify no shop leakage
+    train_shops = set(train_df['employee_shop'].unique())
+    val_shops = set(val_df['employee_shop'].unique())
+    shops_overlap = train_shops & val_shops
+    
+    if shops_overlap:
+        logging.error(f"CRITICAL: Shop leakage detected! {len(shops_overlap)} shops appear in both train and validation: {list(shops_overlap)[:10]}")
+        raise ValueError("Shop leakage detected in data split")
+    else:
+        logging.info(f"✅ No shop leakage detected. Train: {len(train_shops)} shops, Val: {len(val_shops)} shops")
     
     logging.info(f"Train size: {len(train_df)}, Validation size: {len(val_df)}")
 
@@ -740,10 +759,13 @@ def train_catboost_model(X_train, y_train, X_val, y_val, exposure_train, exposur
     
     model = CatBoostRegressor(**params, cat_features=cat_features)
     
+    # C5 Fix: Create pools with validation weights for proper early stopping
+    train_pool = Pool(X_train, label=y_train, cat_features=cat_features, weight=exposure_train)
+    val_pool = Pool(X_val, label=y_val, cat_features=cat_features, weight=exposure_val)
+    
     model.fit(
-        X_train, y_train,
-        eval_set=(X_val, y_val),
-        sample_weight=exposure_train,
+        train_pool,
+        eval_set=[val_pool],
         early_stopping_rounds=params.get('early_stopping_rounds', 50)
     )
     
@@ -812,23 +834,28 @@ def tune_hyperparameters_optuna(X_train, y_train, X_val, y_val, exposure_train, 
         pruning_callback = CatBoostPruningCallback(trial, 'Poisson')
         
         model = CatBoostRegressor(**param, cat_features=cat_features)
+        # C5 Fix: Use Pool objects with validation weights for Optuna optimization
+        train_pool = Pool(X_train, label=y_train, cat_features=cat_features, weight=exposure_train)
+        val_pool = Pool(X_val, label=y_val, cat_features=cat_features, weight=exposure_val)
+        
         model.fit(
-            X_train, y_train,
-            eval_set=[(X_val, y_val)],
-            sample_weight=exposure_train,
+            train_pool,
+            eval_set=[val_pool],
             early_stopping_rounds=param['early_stopping_rounds'],
             callbacks=[pruning_callback],
             verbose=0
         )
         
-        # Use validation Poisson score for optimization
-        return model.best_score_['validation']['Poisson']
+        # Use weighted validation loss for optimization
+        y_pred_val = model.predict(X_val)
+        weighted_mse = np.average((y_pred_val - y_val) ** 2, weights=exposure_val)
+        return weighted_mse
 
     # Create study with MedianPruner
     study = optuna.create_study(
         direction='minimize',  # Minimize Poisson deviance
         pruner=MedianPruner(n_startup_trials=10, n_warmup_steps=20),
-        study_name='catboost_poisson_optimization'
+        study_name='catboost_rmse_optimization'
     )
     
     study.optimize(objective, n_trials=n_trials, n_jobs=10, show_progress_bar=True)

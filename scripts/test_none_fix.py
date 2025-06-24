@@ -16,7 +16,7 @@ def test_none_classification_fix():
     
     # Create a fresh predictor instance (not cached)
     predictor = GiftDemandPredictor(
-        model_path="models/catboost_poisson_model/catboost_poisson_model.cbm",
+        model_path="models/catboost_rmse_model/catboost_rmse_model.cbm",
         historical_data_path="src/data/historical/present.selection.historic.csv"
     )
     

@@ -260,16 +260,16 @@ class GiftDemandPredictor:
         feature_df = self._prepare_features(feature_df)
         
         try:
-            # Make predictions using CatBoost Pool
-            predicted_rates = self._make_catboost_prediction(feature_df)
+            # Make predictions using CatBoost Pool - model outputs counts now
+            predicted_counts = self._make_catboost_prediction(feature_df)
             
-            # Aggregate predictions with proper gender ratio weighting
+            # Aggregate predictions - counts are summed directly
             total_prediction = self._aggregate_predictions(
-                predicted_rates, gender_counts_list
+                predicted_counts, gender_counts_list
             )
             
             # Calculate confidence
-            confidence = self._calculate_confidence(predicted_rates, len(rows))
+            confidence = self._calculate_confidence(predicted_counts, len(rows))
             
             return {
                 "product_id": str(present_id),
@@ -371,7 +371,11 @@ class GiftDemandPredictor:
             if col in df.columns:
                 df[col] = df[col].astype(str).fillna("NONE")
         
-        # Ensure numeric columns
+        # Ensure numeric columns - Fix C4: Enumerate all 96 hash features (32 * 3 interaction sets)
+        INTERACTION_HASH_DIM = 32
+        NUM_INTERACTION_SETS = 3
+        num_hash_features = INTERACTION_HASH_DIM * NUM_INTERACTION_SETS  # 96
+        
         numeric_cols = [
             'shop_main_category_diversity_selected', 'shop_brand_diversity_selected',
             'shop_utility_type_diversity_selected', 'shop_sub_category_diversity_selected',
@@ -379,7 +383,7 @@ class GiftDemandPredictor:
             'is_shop_most_frequent_main_category', 'is_shop_most_frequent_brand',
             'product_share_in_shop', 'brand_share_in_shop',
             'product_rank_in_shop', 'brand_rank_in_shop'
-        ] + [f'interaction_hash_{i}' for i in range(32)]
+        ] + [f'interaction_hash_{i}' for i in range(num_hash_features)]
         
         for col in numeric_cols:
             if col in df.columns:
@@ -443,60 +447,51 @@ class GiftDemandPredictor:
             cat_features=cat_feature_indices
         )
         
-        # Make predictions
-        predictions = self.model.predict(test_pool)
-        predictions = np.clip(predictions, 0, 1)  # Ensure predictions are rates [0,1]
+        # Make predictions - Poisson model outputs counts directly, not rates
+        pred_counts = self.model.predict(test_pool)
+        pred_counts = np.maximum(pred_counts, 0)  # Ensure non-negative counts only
         
-        return predictions
+        return pred_counts
     
-    def _aggregate_predictions(self, predicted_rates: np.ndarray, gender_counts: List[int]) -> float:
+    def _aggregate_predictions(self, predicted_counts: np.ndarray, gender_counts: List[int]) -> float:
         """
-        Aggregate model predictions (selection rates) to total quantity.
+        Aggregate model predictions (selection counts) to total quantity.
+        Model now predicts counts directly, so we sum them without multiplication.
         """
         
-        if len(predicted_rates) != len(gender_counts):
-            logger.error(f"Mismatch: {len(predicted_rates)} predictions vs {len(gender_counts)} counts")
+        if len(predicted_counts) != len(gender_counts):
+            logger.error(f"Mismatch: {len(predicted_counts)} predictions vs {len(gender_counts)} counts")
             return 0.0
         
-        # Calculate expected quantity for each gender group
-        expected_quantities = []
-        for rate, count in zip(predicted_rates, gender_counts):
-            expected_quantities.append(rate * count)
-            
-        # Sum all gender-specific expected quantities
-        total_expected_qty = np.sum(expected_quantities)
+        # Model predicts counts directly - sum without multiplication by employee counts
+        total_expected_qty = np.sum(predicted_counts)
         
         return max(0, total_expected_qty)
     
+    def _calculate_confidence_poisson(self, predictions: np.ndarray) -> float:
+        """
+        Calculate confidence based on Poisson prediction variability for count data.
+        """
+        mean_pred = np.mean(predictions)
+        if mean_pred > 0:
+            # Coefficient of variation for Poisson
+            cv = np.std(predictions) / mean_pred
+            confidence = 1 / (1 + cv)
+        else:
+            confidence = 0.5
+        return np.clip(confidence, 0.5, 0.95)
+    
     def _calculate_confidence(self, predictions: np.ndarray, num_groups: int) -> float:
         """
-        Calculate prediction confidence score based on model RMSE.
-        A lower RMSE (better model performance) results in higher confidence.
+        Calculate prediction confidence score - updated for Poisson model.
         """
-        
-        if self.model_rmse is None:
-            logger.warning("Model RMSE is not available. Returning default low confidence.")
-            return 0.5 # Default low confidence if RMSE is missing
-            
-        # Map RMSE to confidence: 0.5 + 0.45 * exp(-4.05 * RMSE)
-        # This maps RMSE to a range of [0.5, 0.95]
-        # RMSE = 0 -> confidence = 0.5 + 0.45 * 1 = 0.95
-        # RMSE = 0.2 -> confidence = 0.5 + 0.45 * exp(-0.81) ~ 0.5 + 0.45 * 0.444 ~ 0.5 + 0.20 = 0.70
-        # RMSE = 0.4 -> confidence = 0.5 + 0.45 * exp(-1.62) ~ 0.5 + 0.45 * 0.197 ~ 0.5 + 0.09 = 0.59
-        # RMSE -> large, confidence -> 0.5
-        
-        k = 4.05
-        confidence = 0.5 + 0.45 * np.exp(-k * self.model_rmse)
-        
-        # Ensure confidence is within a sensible range, e.g., [0.5, 0.95]
-        confidence = np.clip(confidence, 0.5, 0.95)
-        
-        return float(confidence)
+        # Use Poisson-based confidence calculation since model now predicts counts
+        return self._calculate_confidence_poisson(predictions)
 
 # Force fresh instances to avoid caching issues during development
 _predictor_instance = None
 
-def get_predictor(model_path: str = "models/catboost_poisson_model/catboost_poisson_model.cbm") -> GiftDemandPredictor:
+def get_predictor(model_path: str = "models/catboost_rmse_model/catboost_rmse_model.cbm") -> GiftDemandPredictor:
     """
     Get predictor instance. Creates fresh instance to ensure latest code changes are applied.
     
