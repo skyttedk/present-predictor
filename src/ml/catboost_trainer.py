@@ -328,7 +328,7 @@ def prepare_features_for_catboost(final_features_df: pd.DataFrame, grouping_cols
     
     final_cat_feature_indices = [X.columns.get_loc(col) for col in valid_categorical_features if col in X.columns]
 
-    y_strata = pd.cut(y, bins=[-1, 0, 1, 2, 5, 10, np.inf], labels=[0, 1, 2, 3, 4, 5], include_lowest=True)
+    y_strata = pd.cut(y, bins=[-1, 0, 0.1, 0.2, 0.5, 1.0, np.inf], labels=[0, 1, 2, 3, 4, 5], include_lowest=True)
 
     logging.info(f"Final X features shape: {X.shape}")
     logging.info(f"Target y shape: {y.shape}")
