@@ -36,8 +36,8 @@ graph TD
 ### 2. Data Processing & Feature Engineering Layer
 **Location**: [`src/data/`](src/data/:1), [`src/ml/shop_features.py`](src/ml/shop_features.py:1)
 - **Responsibilities**:
-  - **Historical Data Preprocessing** (in [`src/ml/catboost_trainer.py`](src/ml/catboost_trainer.py:1)): **Crucially, this now involves calculating `selection_rate` by dividing `selection_count` by the total number of employees in that historical group.**
-  - **Real-time Feature Engineering** (in [`src/ml/predictor.py`](src/ml/predictor.py:1)): Classification of gift attributes, gender classification, and resolution of shop-specific features.
+  - **Historical Data Preprocessing & Aggregate Generation** (in [`src/ml/catboost_trainer.py`](src/ml/catboost_trainer.py:1)): During data loading, `employee_shop` is set to be identical to `employee_branch` to ensure consistent shop-level identification. The script then calculates `selection_rate` and, critically, computes and saves shop-level aggregates (diversities, most frequent items, product relativity) *solely from the training data slice using this consolidated identifier*. These static aggregates are then used by the prediction pipeline.
+  - **Real-time Feature Engineering** (in [`src/ml/predictor.py`](src/ml/predictor.py:1)): Classification of gift attributes, gender classification. Shop-specific features are resolved by loading the pre-computed static aggregates via `ShopFeatureResolver` ([`src/ml/shop_features.py`](src/ml/shop_features.py:1)), preventing data leakage.
 - **Key Files**: [`src/data/classifier.py`](src/data/classifier.py:1), [`src/data/gender_classifier.py`](src/data/gender_classifier.py:1), [`src/ml/shop_features.py`](src/ml/shop_features.py:1).
 
 ### 3. Machine Learning Layer (Revised)
@@ -48,6 +48,7 @@ graph TD
     - Trains a `CatBoostRegressor` model.
     - **New Target Variable**: `selection_rate` (a float, not a count).
     - **New Loss Function**: A standard regression loss (e.g., RMSE), **not** Poisson.
+    - **Refined Training Process**: The training script now standardizes the shop identifier by using `employee_branch` for `employee_shop`. It has also been updated to prevent data leakage, ensure correct prediction clamping, use robust feature alignment, and improve feature hashing, adhering to ML best practices. **Model retraining is required due to the shop identifier change.**
   - **Prediction** ([`src/ml/predictor.py`](src/ml/predictor.py:1)):
     - Loads the retrained CatBoost model.
     - Predicts the `selection_rate` for each gift and gender combination.
@@ -63,7 +64,7 @@ graph TD
 
 **Input Data for Prediction:**
 - API Request: Branch code, list of presents, list of employees.
-- Historical Data: Used by `ShopFeatureResolver` and for model training context.
+- Static Shop Aggregates: Pre-computed from the training dataset (by [`src/ml/catboost_trainer.py`](src/ml/catboost_trainer.py:1)) and loaded by `ShopFeatureResolver` ([`src/ml/shop_features.py`](src/ml/shop_features.py:1)) to provide shop context without data leakage.
 
 **Prediction Pipeline (`predictor.py`):**
 1.  **Request Input**: Branch, presents, employees.

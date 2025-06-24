@@ -30,7 +30,7 @@ class GiftDemandPredictor:
     - Prediction aggregation across employee-product combinations
     """
     
-    def __init__(self, model_path: str, historical_data_path: Optional[str] = None):
+    def __init__(self, model_path: str):
         self.model_path = model_path
         self.model = None
         self.shop_resolver = None
@@ -48,7 +48,10 @@ class GiftDemandPredictor:
             'shop_utility_type_diversity_selected', 'shop_sub_category_diversity_selected',
             'shop_most_frequent_main_category_selected', 'shop_most_frequent_brand_selected',
             'unique_product_combinations_in_shop',
-            'is_shop_most_frequent_main_category', 'is_shop_most_frequent_brand'
+            'is_shop_most_frequent_main_category', 'is_shop_most_frequent_brand',
+            # Product relativity features (will be filled with defaults if not present from snapshot)
+            'product_share_in_shop', 'brand_share_in_shop',
+            'product_rank_in_shop', 'brand_rank_in_shop'
         ] + [f'interaction_hash_{i}' for i in range(10)]
         
         # Categorical features (must match training)
@@ -61,8 +64,8 @@ class GiftDemandPredictor:
         ]
         
         # Initialize components
-        self._load_model()
-        self._initialize_shop_resolver(historical_data_path)
+        self._load_model() # This also loads numeric_medians from metadata
+        self._initialize_shop_resolver() # Uses model_dir derived from self.model_path
         
         logger.info("GiftDemandPredictor initialized successfully")
     
@@ -105,14 +108,29 @@ class GiftDemandPredictor:
                  logger.warning("numeric_medians initialized to empty due to an error during loading.")
             raise
     
-    def _initialize_shop_resolver(self, historical_data_path: Optional[str]):
-        """Initialize shop feature resolver"""
+    def _initialize_shop_resolver(self):
+        """Initialize shop feature resolver using aggregates from the model directory."""
         try:
-            self.shop_resolver = ShopFeatureResolver(historical_data_path)
-            logger.info("Shop feature resolver initialized")
+            model_dir = os.path.dirname(self.model_path)
+            if not model_dir or not os.path.isdir(model_dir): # Ensure model_dir is valid
+                logger.error(f"Invalid model directory derived from model_path: '{model_dir}'. Cannot initialize ShopFeatureResolver.")
+                # Set a non-functional resolver or raise an error
+                # For now, let's allow it to proceed but it will use hardcoded defaults.
+                self.shop_resolver = ShopFeatureResolver(model_dir) # It will log warnings
+            else:
+                self.shop_resolver = ShopFeatureResolver(model_dir)
+            logger.info("Shop feature resolver initialized.")
         except Exception as e:
             logger.error(f"Failed to initialize shop resolver: {e}")
-            raise
+            # Consider how to handle this: raise, or allow fallback to default resolver state
+            # For now, let it proceed; the resolver itself has fallbacks.
+            # If self.shop_resolver is not set, calls to it will fail later.
+            # Ensure it's at least instantiated with some default state if critical.
+            if not hasattr(self, 'shop_resolver') or self.shop_resolver is None:
+                 model_dir_fallback = os.path.dirname(self.model_path) if self.model_path else "."
+                 self.shop_resolver = ShopFeatureResolver(model_dir_fallback) # Attempt with potentially invalid path, resolver handles it
+                 logger.warning("ShopFeatureResolver initialized with potentially invalid path due to earlier error.")
+            # raise # Optionally re-raise if resolver is critical for any operation
     
     def predict(self, branch: str, presents: List[Dict], employees: List[Dict]) -> List[PredictionResult]:
         """
@@ -276,17 +294,25 @@ class GiftDemandPredictor:
         return features
     
     def _add_interaction_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Add hashed interaction features"""
-        # Create interaction strings
-        interactions = df.apply(
-            lambda x: f"{x['employee_branch']}_{x['product_main_category']}", 
+        """Add hashed interaction features using sub-tokens."""
+        if df.empty:
+            # Add empty hash columns if df is empty to maintain schema
+            for i in range(self.hasher.n_features):
+                df[f'interaction_hash_{i}'] = 0.0
+            return df
+
+        # Create sub-tokens for better hashing
+        # Ensure columns exist, use 'NONE' as fallback
+        interaction_tokens = df.apply(
+            lambda x: [
+                f"branch_{x.get('employee_branch', 'NONE')}",
+                f"cat_{x.get('product_main_category', 'NONE')}"
+            ],
             axis=1
         )
         
         # Hash interactions
-        hashed_features = self.hasher.transform(
-            interactions.apply(lambda x: [x])
-        ).toarray()
+        hashed_features = self.hasher.transform(interaction_tokens).toarray()
         
         # Add as columns
         for i in range(hashed_features.shape[1]):
@@ -307,35 +333,50 @@ class GiftDemandPredictor:
             'shop_main_category_diversity_selected', 'shop_brand_diversity_selected',
             'shop_utility_type_diversity_selected', 'shop_sub_category_diversity_selected',
             'unique_product_combinations_in_shop',
-            'is_shop_most_frequent_main_category', 'is_shop_most_frequent_brand'
+            'is_shop_most_frequent_main_category', 'is_shop_most_frequent_brand',
+            'product_share_in_shop', 'brand_share_in_shop',
+            'product_rank_in_shop', 'brand_rank_in_shop'
         ] + [f'interaction_hash_{i}' for i in range(10)]
         
         for col in numeric_cols:
             if col in df.columns:
-                # Fill NaNs using loaded medians, fallback to 0 if median not available for a specific column
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(self.numeric_medians.get(col, 0))
-            # Ensure the column exists even if not in input, fill with median or 0
-            elif col in self.numeric_medians:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(self.numeric_medians.get(col, 0.0 if not col.endswith('_rank_in_shop') else 99.0))
+            elif col in self.numeric_medians: # Ensure the column exists even if not in input, fill with median
                  df[col] = self.numeric_medians[col]
             else: # Fallback if column is expected but not in input and no median
-                 df[col] = 0.0
+                 default_val = 0.0 if not col.endswith('_rank_in_shop') else 99.0
+                 df[col] = default_val
+                 logger.error(f"CRITICAL: Numeric column '{col}' was expected but not found in input df AND its median was not in loaded numeric_medians. Defaulted to {default_val}. This may indicate a schema mismatch or an issue with saved model artifacts.")
 
 
-        # Add missing columns with defaults
+        # Add any other missing columns from self.expected_columns with appropriate defaults
         for col in self.expected_columns:
-            if col not in df.columns: # This handles columns that might not have been in numeric_cols or categorical_features explicitly
-                if col.startswith('interaction_hash_'):
-                    df[col] = self.numeric_medians.get(col, 0.0) # Use median if available for hashes too
-                elif col in self.categorical_features:
+            if col not in df.columns:
+                if col in self.categorical_features:
                     df[col] = "NONE"
-                elif col in self.numeric_medians: # Other numeric columns expected
+                elif col in self.numeric_medians: # Check medians first for any numeric column
                     df[col] = self.numeric_medians[col]
-                else: # Absolute fallback for unexpected missing columns
+                elif col.endswith('_rank_in_shop'): # Specific default for rank features
+                    df[col] = 99.0
+                    # No warning needed here if it's a rank feature and median is missing, as 99.0 is a defined fallback.
+                else: # General numeric default for other columns not in numeric_medians
                     df[col] = 0.0
-                    logger.warning(f"Column '{col}' was missing from input and no median found. Defaulted to 0.0.")
+                    logger.error(f"CRITICAL: Expected column '{col}' was missing from input DataFrame AND its median was not in loaded numeric_medians. Defaulted to 0.0. This may indicate a schema mismatch or an issue with saved model artifacts.")
+                # Original warning for missing column, now more contextual based on median presence
+                if not (col in self.numeric_medians or col in self.categorical_features or col.endswith('_rank_in_shop')):
+                     logger.warning(f"Column '{col}' was missing from input DataFrame and not found in medians/categoricals. Defaulted to '{df[col].iloc[0] if len(df)>0 and isinstance(df[col], pd.Series) else df[col] }'.")
         
-        # Reorder columns to match training
-        df = df[self.expected_columns]
+        # Reorder columns to match training, ensure all expected columns are present
+        df = df.reindex(columns=self.expected_columns, fill_value=0) # fill_value for any still missed numeric
+        # Post-reindex fill for categoricals that might have been added as 0 by reindex
+        for col in self.categorical_features:
+            if col in df.columns and df[col].dtype != 'object' and df[col].dtype != 'str':
+                 # If a categorical column was added by reindex (e.g. as 0), convert to "NONE"
+                 if (df[col] == 0).all(): # Check if it was filled with 0
+                      df[col] = "NONE"
+                 df[col] = df[col].astype(str)
+
+
         
         return df
     
@@ -356,7 +397,7 @@ class GiftDemandPredictor:
         
         # Make predictions
         predictions = self.model.predict(test_pool)
-        predictions = np.maximum(0, predictions)  # Ensure non-negative
+        predictions = np.clip(predictions, 0, 1)  # Ensure predictions are rates [0,1]
         
         return predictions
     
@@ -408,14 +449,12 @@ class GiftDemandPredictor:
 # Force fresh instances to avoid caching issues during development
 _predictor_instance = None
 
-def get_predictor(model_path: str = "models/catboost_poisson_model/catboost_poisson_model.cbm",
-                 historical_data_path: Optional[str] = "src/data/historical/present.selection.historic.csv") -> GiftDemandPredictor:
+def get_predictor(model_path: str = "models/catboost_rmse_model/catboost_rmse_model.cbm") -> GiftDemandPredictor:
     """
     Get predictor instance. Creates fresh instance to ensure latest code changes are applied.
     
     Args:
-        model_path: Path to trained CatBoost model
-        historical_data_path: Path to historical selection data
+        model_path: Path to trained CatBoost model (e.g., "models/catboost_rmse_model/catboost_rmse_model.cbm")
         
     Returns:
         GiftDemandPredictor instance
@@ -424,6 +463,7 @@ def get_predictor(model_path: str = "models/catboost_poisson_model/catboost_pois
     
     # Always create fresh instance to avoid caching issues
     logger.info("Creating fresh predictor instance to ensure latest code changes")
-    _predictor_instance = GiftDemandPredictor(model_path, historical_data_path)
+    # The historical_data_path is no longer needed here, as ShopFeatureResolver uses model_dir
+    _predictor_instance = GiftDemandPredictor(model_path)
     
     return _predictor_instance

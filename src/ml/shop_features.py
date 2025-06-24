@@ -14,118 +14,91 @@ import numpy as np
 import logging
 from typing import Dict, List, Optional
 import os
+import pickle
 
 logger = logging.getLogger(__name__)
 
 class ShopFeatureResolver:
     """
-    Resolves shop-level features using historical data or similar shop proxies.
+    Resolves shop-level features using pre-computed aggregates from the training data.
     
     Fallback strategy:
-    1. Direct lookup for existing shop
-    2. Average features from similar shops (same branch code)
-    3. Global average defaults
+    1. Direct lookup for existing shop from snapshot.
+    2. Average features from similar shops (same branch code) from snapshot.
+    3. Global average defaults from snapshot.
     """
     
-    def __init__(self, historical_data_path: Optional[str] = None):
-        self.historical_features = {}
-        self.branch_mapping = {}
-        self.global_defaults = {}
-        self.product_relativity_lookup = pd.DataFrame()
+    def __init__(self, model_dir: str):
+        self.historical_features: Dict[str, Dict] = {}
+        self.branch_mapping: Dict[str, List[str]] = {}
+        self.global_defaults: Dict[str, any] = {}
+        self.product_relativity_lookup: pd.DataFrame = pd.DataFrame()
         
-        if historical_data_path and os.path.exists(historical_data_path):
-            self._load_historical_features(historical_data_path)
-            self._load_product_relativity_features()
-        else:
-            logger.warning(f"Historical data not found at {historical_data_path}, using defaults")
-            self._set_default_features()
-    
-    def _load_historical_features(self, data_path: str):
-        """Load and compute shop features from historical selection data"""
-        try:
-            logger.info(f"Loading historical data from {data_path}")
-            df = pd.read_csv(data_path, dtype=str)
-            
-            # Clean data
-            for col in df.columns:
-                df[col] = df[col].astype(str).str.strip().str.strip('"')
-            
-            df = df.fillna("NONE")
-            
-            # Normalize categorical columns
-            categorical_cols_to_lower = [
-                'employee_gender', 'product_target_gender',
-                'product_utility_type', 'product_durability', 'product_type'
-            ]
-            for col in categorical_cols_to_lower:
-                if col in df.columns:
-                    df[col] = df[col].str.lower()
-            
-            # Compute shop diversity features
-            shop_stats = df.groupby('employee_shop').agg({
-                'product_main_category': 'nunique',
-                'product_sub_category': 'nunique',
-                'product_brand': 'nunique',
-                'product_utility_type': 'nunique'
-            }).reset_index()
-            
-            shop_stats.columns = [
-                'employee_shop',
-                'shop_main_category_diversity_selected',
-                'shop_sub_category_diversity_selected',
-                'shop_brand_diversity_selected',
-                'shop_utility_type_diversity_selected'
-            ]
-            
-            # Get most frequent categories and brands per shop
-            shop_main_cats = df.groupby(['employee_shop', 'product_main_category']).size().reset_index(name='count')
-            shop_main_cats = shop_main_cats.loc[shop_main_cats.groupby('employee_shop')['count'].idxmax()]
-            
-            shop_brands = df.groupby(['employee_shop', 'product_brand']).size().reset_index(name='count')
-            shop_brands = shop_brands.loc[shop_brands.groupby('employee_shop')['count'].idxmax()]
-            
-            # Count unique product combinations per shop
-            shop_combinations = df.groupby('employee_shop').size().reset_index(name='unique_product_combinations_in_shop')
-            
-            # Store features by shop
-            for _, row in shop_stats.iterrows():
-                shop_id = row['employee_shop']
-                
-                # Get most frequent items for this shop
-                most_freq_cat = shop_main_cats[shop_main_cats['employee_shop'] == shop_id]['product_main_category'].iloc[0] if len(shop_main_cats[shop_main_cats['employee_shop'] == shop_id]) > 0 else 'NONE'
-                most_freq_brand = shop_brands[shop_brands['employee_shop'] == shop_id]['product_brand'].iloc[0] if len(shop_brands[shop_brands['employee_shop'] == shop_id]) > 0 else 'NONE'
-                unique_combinations = shop_combinations[shop_combinations['employee_shop'] == shop_id]['unique_product_combinations_in_shop'].iloc[0] if len(shop_combinations[shop_combinations['employee_shop'] == shop_id]) > 0 else 1
-                
-                self.historical_features[shop_id] = {
-                    'shop_main_category_diversity_selected': int(row['shop_main_category_diversity_selected']),
-                    'shop_brand_diversity_selected': int(row['shop_brand_diversity_selected']),
-                    'shop_utility_type_diversity_selected': int(row['shop_utility_type_diversity_selected']),
-                    'shop_sub_category_diversity_selected': int(row['shop_sub_category_diversity_selected']),
-                    'shop_most_frequent_main_category_selected': most_freq_cat,
-                    'shop_most_frequent_brand_selected': most_freq_brand,
-                    'unique_product_combinations_in_shop': int(unique_combinations)
-                }
-            
-            # Build branch to shop mapping
-            branch_shop_map = df.groupby('employee_branch')['employee_shop'].unique().to_dict()
-            for branch, shops in branch_shop_map.items():
-                self.branch_mapping[branch] = list(shops)
-            
-            # Compute global defaults
-            self._compute_global_defaults()
-                
-            logger.info(f"Loaded features for {len(self.historical_features)} shops")
-            logger.info(f"Built branch mapping for {len(self.branch_mapping)} branches")
-            
-        except Exception as e:
-            logger.error(f"Error loading historical data: {e}")
-            self._set_default_features()
+        self.model_dir = model_dir
+        self._load_snapshot_aggregates()
 
-    def _load_product_relativity_features(self):
-        """Loads the pre-computed product relativity features lookup table."""
-        # Determine the path relative to this file's location or a known models dir
-        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        lookup_path = os.path.join(base_dir, "models", "catboost_poisson_model", "product_relativity_features.csv")
+    def _load_snapshot_aggregates(self):
+        """Loads all pre-computed aggregate snapshots from the model directory."""
+        loaded_all = True
+
+        # 1. Load historical_features_snapshot
+        hist_features_path = os.path.join(self.model_dir, 'historical_features_snapshot.pkl')
+        if os.path.exists(hist_features_path):
+            try:
+                with open(hist_features_path, 'rb') as f:
+                    self.historical_features = pickle.load(f)
+                logger.info(f"Loaded historical_features_snapshot.pkl for {len(self.historical_features)} shops.")
+            except Exception as e:
+                logger.error(f"Failed to load historical_features_snapshot.pkl: {e}")
+                self.historical_features = {}
+                loaded_all = False
+        else:
+            logger.warning(f"historical_features_snapshot.pkl not found in {self.model_dir}.")
+            self.historical_features = {}
+            loaded_all = False
+
+        # 2. Load branch_mapping_snapshot
+        branch_map_path = os.path.join(self.model_dir, 'branch_mapping_snapshot.pkl')
+        if os.path.exists(branch_map_path):
+            try:
+                with open(branch_map_path, 'rb') as f:
+                    self.branch_mapping = pickle.load(f)
+                logger.info(f"Loaded branch_mapping_snapshot.pkl for {len(self.branch_mapping)} branches.")
+            except Exception as e:
+                logger.error(f"Failed to load branch_mapping_snapshot.pkl: {e}")
+                self.branch_mapping = {}
+                loaded_all = False
+        else:
+            logger.warning(f"branch_mapping_snapshot.pkl not found in {self.model_dir}.")
+            self.branch_mapping = {}
+            loaded_all = False
+
+        # 3. Load global_defaults_snapshot
+        global_defaults_path = os.path.join(self.model_dir, 'global_defaults_snapshot.pkl')
+        if os.path.exists(global_defaults_path):
+            try:
+                with open(global_defaults_path, 'rb') as f:
+                    self.global_defaults = pickle.load(f)
+                logger.info(f"Loaded global_defaults_snapshot.pkl: {self.global_defaults}")
+            except Exception as e:
+                logger.error(f"Failed to load global_defaults_snapshot.pkl: {e}")
+                self.global_defaults = {}
+                loaded_all = False
+        else:
+            logger.warning(f"global_defaults_snapshot.pkl not found in {self.model_dir}.")
+            self.global_defaults = {}
+            loaded_all = False
+            
+        # 4. Load product_relativity_features.csv
+        self._load_product_relativity_features_from_snapshot() # This method handles its own logging and fallbacks
+
+        if not loaded_all or self.product_relativity_lookup.empty or not self.global_defaults:
+            logger.warning("One or more snapshot aggregates failed to load. Falling back to hardcoded defaults for missing parts.")
+            self._set_default_features_if_empty()
+
+    def _load_product_relativity_features_from_snapshot(self):
+        """Loads the pre-computed product relativity features lookup table from the model directory."""
+        lookup_path = os.path.join(self.model_dir, "product_relativity_features.csv")
 
         if os.path.exists(lookup_path):
             try:
@@ -139,46 +112,46 @@ class ShopFeatureResolver:
                 self.product_relativity_lookup.fillna({
                     'product_share_in_shop': 0.0,
                     'brand_share_in_shop': 0.0,
-                    'product_rank_in_shop': 99, # High rank (low importance) for fallback
-                    'brand_rank_in_shop': 99
+                    'product_rank_in_shop': 99.0,
+                    'brand_rank_in_shop': 99.0
                 }, inplace=True)
 
-                logger.info(f"Successfully loaded product relativity lookup table from {lookup_path} with {len(self.product_relativity_lookup)} rows.")
+                logger.info(f"Successfully loaded product_relativity_features.csv from snapshot with {len(self.product_relativity_lookup)} rows.")
             except Exception as e:
-                logger.error(f"Failed to load or process product relativity lookup table from {lookup_path}: {e}")
+                logger.error(f"Failed to load or process product_relativity_features.csv from snapshot: {e}")
                 self.product_relativity_lookup = pd.DataFrame()
         else:
-            logger.warning(f"Product relativity lookup table not found at {lookup_path}. Product-specific features will use defaults.")
+            logger.warning(f"product_relativity_features.csv not found in {self.model_dir}. Product-specific features will use defaults.")
             self.product_relativity_lookup = pd.DataFrame()
     
-    def _compute_global_defaults(self):
-        """Compute global average features as ultimate fallback"""
+    def _set_default_features_if_empty(self):
+        """Sets hardcoded default features if any of the loaded snapshots are empty or missing."""
+        if not self.global_defaults: # If global_defaults couldn't be loaded, set them.
+            self.global_defaults = {
+                'shop_main_category_diversity_selected': 5,
+                'shop_brand_diversity_selected': 8,
+                'shop_utility_type_diversity_selected': 3,
+                'shop_sub_category_diversity_selected': 6,
+                'shop_most_frequent_main_category_selected': 'Home & Kitchen',
+                'shop_most_frequent_brand_selected': 'NONE',
+                'unique_product_combinations_in_shop': 45
+            }
+            logger.info("Using hardcoded global default features as snapshot was missing/empty.")
+        
+        # Ensure historical_features and branch_mapping are at least empty dicts if loading failed
         if not self.historical_features:
-            self._set_default_features()
-            return
-        
-        # Calculate averages for numeric features
-        numeric_features = [
-            'shop_main_category_diversity_selected',
-            'shop_brand_diversity_selected',
-            'shop_utility_type_diversity_selected',
-            'shop_sub_category_diversity_selected',
-            'unique_product_combinations_in_shop'
-        ]
-        
-        for feature in numeric_features:
-            values = [shop_data[feature] for shop_data in self.historical_features.values()]
-            self.global_defaults[feature] = int(np.mean(values)) if values else 5
-        
-        # Most common categorical features
-        main_cats = [shop_data['shop_most_frequent_main_category_selected'] for shop_data in self.historical_features.values()]
-        brands = [shop_data['shop_most_frequent_brand_selected'] for shop_data in self.historical_features.values()]
-        
-        self.global_defaults['shop_most_frequent_main_category_selected'] = max(set(main_cats), key=main_cats.count) if main_cats else 'Home & Kitchen'
-        self.global_defaults['shop_most_frequent_brand_selected'] = max(set(brands), key=brands.count) if brands else 'NONE'
-        
-        logger.info(f"Computed global defaults: {self.global_defaults}")
-    
+            self.historical_features = {}
+        if not self.branch_mapping:
+            self.branch_mapping = {}
+        if self.product_relativity_lookup.empty:
+            # Ensure it's an empty DataFrame with expected columns for downstream logic if it failed to load
+            self.product_relativity_lookup = pd.DataFrame(columns=[
+                'employee_shop', 'employee_branch', 'product_main_category', 'product_brand',
+                'product_share_in_shop', 'brand_share_in_shop',
+                'product_rank_in_shop', 'brand_rank_in_shop'
+            ])
+
+
     def _set_default_features(self):
         """Set hardcoded default features when no historical data available"""
         self.global_defaults = {
