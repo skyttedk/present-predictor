@@ -159,8 +159,8 @@ async def predict_endpoint(
     
     start_time = time.time()
     
-    # Step 1: Fetch industry code from CVR API
-    branch = await fetch_industry_code(request_data.cvr)
+    # Step 1: Use CVR as branch identifier (skip industry code fetch)
+    branch = request_data.cvr
     if not branch:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

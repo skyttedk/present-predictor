@@ -31,9 +31,13 @@ class ShopFeatureResolver:
     def __init__(self, model_dir: str):
         self.shop_data: Dict[str, Dict] = {}
         self.global_defaults: Dict[str, any] = {}
+        # Product relativity snapshot (share/rank numeric features)
+        # Keyed by (shop_id, main_category, brand)
+        self.product_relativity: Dict[tuple, Dict[str, float]] = {}
         
         self.model_dir = model_dir
         self._load_shop_aggregates()
+        self._load_product_relativity()
 
     def _load_shop_aggregates(self):
         """Load shop aggregates from the model directory."""
@@ -77,6 +81,56 @@ class ShopFeatureResolver:
             'most_frequent_brand': 'NONE'
         }
         logger.info("Using hardcoded default features")
+
+    def _load_product_relativity(self):
+        """
+        Load product relativity snapshot containing share/rank numeric features:
+        product_share_in_shop, brand_share_in_shop, product_rank_in_shop, brand_rank_in_shop
+        The CSV is produced by the training pipeline and stored beside the model.
+        """
+        relativity_path = os.path.join(self.model_dir, "product_relativity_features.csv")
+        if not os.path.exists(relativity_path):
+            logger.warning(f"Product relativity snapshot not found at {relativity_path}. "
+                           "Numeric share/rank features will fallback to defaults.")
+            self.product_relativity = {}
+            return
+
+        try:
+            df = pd.read_csv(relativity_path)
+            required_cols = {
+                "employee_shop",
+                "product_main_category",
+                "product_brand",
+                "product_share_in_shop",
+                "brand_share_in_shop",
+                "product_rank_in_shop",
+                "brand_rank_in_shop",
+            }
+            missing = required_cols - set(df.columns)
+            if missing:
+                logger.error(
+                    f"Product relativity CSV missing columns {missing}. "
+                    "Share/rank features will fallback to defaults."
+                )
+                self.product_relativity = {}
+                return
+
+            # Build fast lookup dictionary
+            self.product_relativity = {
+                (str(row["employee_shop"]), str(row["product_main_category"]), str(row["product_brand"])): {
+                    "product_share_in_shop": float(row["product_share_in_shop"]),
+                    "brand_share_in_shop": float(row["brand_share_in_shop"]),
+                    "product_rank_in_shop": float(row["product_rank_in_shop"]),
+                    "brand_rank_in_shop": float(row["brand_rank_in_shop"]),
+                }
+                for _, row in df.iterrows()
+            }
+            logger.info(
+                f"Loaded product relativity snapshot with {len(self.product_relativity)} rows."
+            )
+        except Exception as e:
+            logger.error(f"Failed to load product relativity snapshot: {e}")
+            self.product_relativity = {}
     
     def resolve_features(self, shop_id: str, main_category: str,
                         sub_category: str, brand: str) -> Dict[str, any]:
@@ -139,6 +193,18 @@ class ShopFeatureResolver:
                 'is_shop_most_frequent_brand': 0
             })
         
+        # ------------------------------------------------------------------
+        # Inject product relativity numeric features (share / rank)
+        # ------------------------------------------------------------------
+        rel_key = (str(shop_id), str(main_category), str(brand))
+        rel_data = self.product_relativity.get(rel_key, {})
+
+        features['product_share_in_shop'] = rel_data.get('product_share_in_shop', 0.0)
+        features['brand_share_in_shop'] = rel_data.get('brand_share_in_shop', 0.0)
+        # Use 99.0 as default high rank (worst) when missing
+        features['product_rank_in_shop'] = rel_data.get('product_rank_in_shop', 99.0)
+        features['brand_rank_in_shop'] = rel_data.get('brand_rank_in_shop', 99.0)
+
         return features
 
     

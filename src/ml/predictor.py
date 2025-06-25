@@ -274,10 +274,25 @@ class GiftDemandPredictor:
         
         # Prepare features for model
         feature_df = self._prepare_features(feature_df)
+        # DIAGNOSTIC: Inspect engineered features to detect potential collapse
+        logger.info(
+            f"Non-null columns count for present {present_id}: "
+            f"{(feature_df != 0).sum().to_dict()}"
+        )
+        # Log first feature vector (should differ between presents)
+        logger.info(
+            f"First feature vector sample for present {present_id}: "
+            f"{feature_df.iloc[0].to_dict()}"
+        )
         
         try:
             # Make predictions using CatBoost Pool - model outputs counts now
             predicted_counts = self._make_catboost_prediction(feature_df)
+            # DIAGNOSTIC: Inspect raw model outputs before aggregation
+            logger.info(
+                f"Raw predicted counts for present {present_id}: "
+                f"{predicted_counts.tolist()}"
+            )
             
             # Aggregate predictions - counts are summed directly
             total_prediction = self._aggregate_predictions(
