@@ -34,9 +34,12 @@ class ShopFeatureResolver:
         # Product relativity snapshot (share/rank numeric features)
         # Keyed by (shop_id, main_category, brand)
         self.product_relativity: Dict[tuple, Dict[str, float]] = {}
+        # Branch to shop mapping from training data
+        self.branch_mapping: Dict[str, List[str]] = {}
         
         self.model_dir = model_dir
         self._load_shop_aggregates()
+        self._load_branch_mapping()
         self._load_product_relativity()
 
     def _load_shop_aggregates(self):
@@ -46,8 +49,10 @@ class ShopFeatureResolver:
         if os.path.exists(hist_features_path):
             try:
                 with open(hist_features_path, 'rb') as f:
-                    self.shop_data = pickle.load(f)
-                logger.info(f"Loaded shop data for {len(self.shop_data)} shops.")
+                    loaded_data = pickle.load(f)
+                # Coerce all keys to str to avoid type mismatches
+                self.shop_data = {str(k): v for k, v in loaded_data.items()}
+                logger.info(f"Loaded shop data for {len(self.shop_data)} shops (keys coerced to str).")
             except Exception as e:
                 logger.error(f"Failed to load shop data: {e}")
                 self.shop_data = {}
@@ -81,6 +86,26 @@ class ShopFeatureResolver:
             'most_frequent_brand': 'NONE'
         }
         logger.info("Using hardcoded default features")
+
+    def _load_branch_mapping(self):
+        """Load branch->shops mapping from the model directory."""
+        branch_mapping_path = os.path.join(self.model_dir, 'branch_mapping_snapshot.pkl')
+        if os.path.exists(branch_mapping_path):
+            try:
+                with open(branch_mapping_path, 'rb') as f:
+                    loaded_mapping = pickle.load(f)
+                # Ensure both keys and values are strings
+                self.branch_mapping = {
+                    str(branch): [str(shop) for shop in shops]
+                    for branch, shops in loaded_mapping.items()
+                }
+                logger.info(f"Loaded branch mapping for {len(self.branch_mapping)} branches.")
+            except Exception as e:
+                logger.error(f"Failed to load branch mapping: {e}")
+                self.branch_mapping = {}
+        else:
+            logger.warning(f"Branch mapping not found in {self.model_dir}.")
+            self.branch_mapping = {}
 
     def _load_product_relativity(self):
         """
@@ -146,12 +171,54 @@ class ShopFeatureResolver:
         Returns:
             Dictionary of shop features only (diversity and most frequent items)
         """
+        # Coerce all identifiers to str for consistent lookup
+        shop_id_str = str(shop_id)
+        main_category = str(main_category)
+        sub_category = str(sub_category)
+        brand = str(brand)
+        
         features = {}
         
-        # Only keep diversity and most frequent features
-        # C2 Fix: Handle both key formats (trainer saves with 'shop_' prefix)
-        if shop_id in self.shop_data:
-            shop_info = self.shop_data[shop_id]
+        # DIAG: basic information about resolution path
+        logger.info(
+            "ShopFeatureResolver DIAG: shop_id=%s main=%s sub=%s brand=%s in_snapshot=%s",
+            shop_id_str,
+            main_category,
+            sub_category,
+            brand,
+            shop_id_str in self.shop_data,
+        )
+        
+        # More detailed debugging
+        logger.info(f"Available shop_data keys (first 10): {list(self.shop_data.keys())[:10]}")
+        logger.info(f"Branch mapping exists: {bool(self.branch_mapping)}, num branches: {len(self.branch_mapping)}")
+        if shop_id_str in self.branch_mapping:
+            logger.info(f"Branch {shop_id_str} maps to shops: {self.branch_mapping[shop_id_str]}")
+        
+        # Resolution strategy:
+        # 1. Direct shop lookup
+        # 2. Branch-based fallback
+        # 3. Global defaults
+        
+        shop_info = None
+        
+        # 1. Direct shop lookup
+        if shop_id_str in self.shop_data:
+            shop_info = self.shop_data[shop_id_str]
+            logger.debug(f"Found shop {shop_id_str} directly in shop_data")
+        
+        # 2. Branch-based fallback
+        elif shop_id_str in self.branch_mapping:
+            candidate_shops = self.branch_mapping[shop_id_str]
+            # Find the first mapped shop that has data
+            for candidate in candidate_shops:
+                if candidate in self.shop_data:
+                    shop_info = self.shop_data[candidate]
+                    logger.info(f"Branch fallback: using shop {candidate} for branch {shop_id_str}")
+                    break
+        
+        # Populate features based on what we found
+        if shop_info is not None:
             features.update({
                 'shop_main_category_diversity_selected':
                     shop_info.get('shop_main_category_diversity_selected') or
@@ -181,7 +248,11 @@ class ShopFeatureResolver:
                 brand == features.get('shop_most_frequent_brand_selected', '')
             )
         else:
-            # Use global defaults if shop not found
+            # 3. Use global defaults if shop not found
+            logger.info(
+                "ShopFeatureResolver DIAG: shop_id=%s not found, falling back to global defaults",
+                shop_id_str,
+            )
             features.update({
                 'shop_main_category_diversity_selected': self.global_defaults.get('main_category_diversity', 5),
                 'shop_sub_category_diversity_selected': self.global_defaults.get('sub_category_diversity', 6),

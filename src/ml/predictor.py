@@ -271,9 +271,34 @@ class GiftDemandPredictor:
         # Create DataFrame and add interaction features
         feature_df = pd.DataFrame(rows)
         feature_df = self._add_interaction_features(feature_df)
-        
+         
         # Prepare features for model
         feature_df = self._prepare_features(feature_df)
+
+        # ------------------------------------------------------------------
+        # EXTRA DIAGNOSTIC LOGGING FOR FEATURE COLLAPSE INVESTIGATION
+        # ------------------------------------------------------------------
+        try:
+            os.makedirs("logs", exist_ok=True)
+            snapshot_path = os.path.join("logs", "feature_snapshot.csv")
+            # Append first five rows of every present to CSV for offline inspection
+            feature_df.head().to_csv(snapshot_path, mode="a", index=False)
+        except Exception as e:
+            logger.warning(f"Failed to write feature snapshot CSV: {e}")
+
+        # Compute uniqueness and hash variance statistics
+        try:
+            unique_rows = feature_df.drop_duplicates().shape[0]
+            hash_std_mean = feature_df.filter(like="interaction_hash_").std().mean()
+            logger.info(
+                "DIAG: present %s -> unique_rows=%s/%s, mean_hash_std=%.6f",
+                present_id,
+                unique_rows,
+                feature_df.shape[0],
+                hash_std_mean,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to compute feature diagnostics: {e}")
         # DIAGNOSTIC: Inspect engineered features to detect potential collapse
         logger.info(
             f"Non-null columns count for present {present_id}: "
