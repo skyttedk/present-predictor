@@ -6,6 +6,7 @@ import time
 
 from .schemas.requests import AddPresentRequest, CreateUserRequest, DeleteUserRequest, PredictRequest
 from .schemas.responses import CSVImportResponse, CSVImportSummary, DeleteAllPresentsResponse, CountPresentsResponse, PresentCountByStatus, CreateUserResponse, ListUsersResponse, DeleteUserResponse, UserInfo, TailLogsResponse, ApiLogEntry, TransformedPredictResponse, TransformedPresent, TransformedEmployee, PredictionResponse
+from .schemas.gender_schemas import GenderClassificationRequest, GenderBatchRequest, GenderClassificationResponse, GenderBatchResponse
 from ..data.cvr_client import fetch_industry_code
 from ..data.gender_classifier import classify_employee_gender
 from ..database.presents import get_present_by_hash
@@ -140,6 +141,105 @@ async def test_endpoint(current_user: Dict = Depends(get_current_user)):
     A simple test endpoint, protected by API key.
     """
     return {"message": f"Test endpoint is working! Hello {current_user.get('username')}!"}
+
+
+@app.post("/classify/gender", response_model=GenderClassificationResponse)
+async def classify_gender_endpoint(
+    request_data: GenderClassificationRequest,
+    current_user: Dict = Depends(get_current_user)
+):
+    """
+    Classify the gender of a single name using enhanced Danish gender classification.
+    
+    This endpoint uses gender_guesser enhanced with Danish name patterns
+    to classify employee names for demographic analysis.
+    """
+    start_time = time.time()
+    
+    try:
+        # Classify the gender
+        gender_result = classify_employee_gender(request_data.name)
+        
+        # Calculate processing time
+        processing_time_ms = (time.time() - start_time) * 1000
+        
+        logger.info(f"Gender classified for name '{request_data.name}': {gender_result.value} ({processing_time_ms:.2f}ms)")
+        
+        return GenderClassificationResponse(
+            name=request_data.name,
+            gender=gender_result.value,
+            confidence="high" if gender_result.value in ["male", "female"] else "low",
+            processing_time_ms=processing_time_ms
+        )
+        
+    except Exception as e:
+        logger.error(f"Gender classification failed for name '{request_data.name}': {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Gender classification failed: {str(e)}"
+        )
+
+
+@app.post("/classify/gender/batch", response_model=GenderBatchResponse)
+async def classify_gender_batch_endpoint(
+    request_data: GenderBatchRequest,
+    current_user: Dict = Depends(get_current_user)
+):
+    """
+    Classify the gender of multiple names in a single request.
+    
+    This endpoint processes multiple names efficiently for batch gender classification,
+    useful for processing employee lists in external applications.
+    """
+    start_time = time.time()
+    
+    if not request_data.names:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Names list cannot be empty"
+        )
+    
+    if len(request_data.names) > 1000:  # Reasonable batch size limit
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Batch size cannot exceed 1000 names"
+        )
+    
+    try:
+        # Process all names
+        results = []
+        for name in request_data.names:
+            gender_result = classify_employee_gender(name)
+            
+            result = GenderClassificationResponse(
+                name=name,
+                gender=gender_result.value,
+                confidence="high" if gender_result.value in ["male", "female"] else "low",
+                processing_time_ms=0  # Will be set to total time at the end
+            )
+            results.append(result)
+        
+        # Calculate processing time
+        processing_time_ms = (time.time() - start_time) * 1000
+        
+        # Update processing time for all results
+        for result in results:
+            result.processing_time_ms = processing_time_ms
+        
+        logger.info(f"Batch gender classification completed: {len(results)} names processed ({processing_time_ms:.2f}ms)")
+        
+        return GenderBatchResponse(
+            results=results,
+            total_processed=len(results),
+            processing_time_ms=processing_time_ms
+        )
+        
+    except Exception as e:
+        logger.error(f"Batch gender classification failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Batch gender classification failed: {str(e)}"
+        )
 
 
 @app.post("/predict", response_model=PredictionResponse)
